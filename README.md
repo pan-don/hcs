@@ -1,6 +1,6 @@
 <div align="center">
 
-# PEMETAAN WILAYAH HIGH CARBON STOCK (HCS) BERBASIS FUSI DATA MULTIMODAL SATELLITE DAN MACHINE LEARNING
+# PEMETAAN WILAYAH HIGH CARBON STOCK (HCS)
 ### Studi Kasus: Lanskap Hutan dan Dinamika Tutupan Lahan Kabupaten Bogor, Jawa Barat
 
 [![HCSA Methodology](https://img.shields.io/badge/Methodology-HCSA%20Toolkit%20v2.0-2e7d32.svg)](http://highcarbonstock.org)
