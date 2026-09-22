@@ -45,7 +45,7 @@ Proyek ini mengimplementasikan kerangka kerja terpadu **High Carbon Stock Approa
 >
 > Seluruh data dapat diunduh langsung melalui tautan cloud storage resmi berikut:
 >
-> 🔗 **[Akses Repositori Google Drive: Dataset & Output HCS Bogor](https://drive.google.com/drive/folders/YOUR_GDRIVE_FOLDER_ID)**
+> 🔗 **[Akses Repositori Google Drive: Dataset & Output HCS Bogor](https://drive.google.com/drive/folders/1Hnx-QAlqjqg8yxAYvLJVd_Q4LH63mCwV?usp=sharing)**
 
 ### Struktur Folder di Google Drive:
 ```
