@@ -1,6 +1,6 @@
-// =============================================================
-// KONFIGURASI DAN PARAMETER MODEL
-// =============================================================
+// -------------------------------------------------------------
+// KONFIGURASI
+// -------------------------------------------------------------
 var ASSET_ID = 'users/sananta/gedi_master_multimodal_dataset';
 var TARGET = 'agbd';
 var SPLIT_SEED = 42;
@@ -19,26 +19,63 @@ var RF_PARAMS = {
 };
 
 var FEATURES = [
-    's2_b2', 's2_b3', 's2_b4', 's2_b5', 's2_b6', 's2_b7', 's2_b8', 's2_b11', 's2_b12',
-    'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
-    'ireci_contrast', 'ireci_ent', 'ireci_corr',
-    'swir_contrast', 'swir_ent', 'swir_corr',
-    's1_vv', 's1_vh',
-    's1_vv_contrast', 's1_vv_ent', 's1_vv_corr',
-    's1_vh_contrast', 's1_vh_ent', 's1_vh_corr',
+    'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b11', 'b12',
+    'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi',
+    'vv', 'vh',
+    'vv_cont', 'vv_ent', 'vv_corr',
+    'vh_cont', 'vh_ent', 'vh_corr',
     'dem', 'slope', 'aspect',
     'water', 'trees', 'grass', 'flooded_veg',
     'crops', 'shrub_scrub', 'built', 'bareland'
 ];
 
-// =============================================================
+// -------------------------------------------------------------
 // LOAD DAN VALIDASI DATASET
-// =============================================================
+// -------------------------------------------------------------
 var rawDataset = typeof table !== 'undefined' ? table : ee.FeatureCollection(ASSET_ID);
 
-var totalRaw = rawDataset.size();
+var standardizedDataset = rawDataset.map(function (f) {
+    var d = f.toDictionary();
 
-var slopeFiltered = rawDataset.filter(ee.Filter.lte('slope', MAX_SLOPE_DEG));
+    var b2 = ee.Algorithms.If(d.contains('b2'), d.get('b2'), d.get('s2_b2'));
+    var b3 = ee.Algorithms.If(d.contains('b3'), d.get('b3'), d.get('s2_b3'));
+    var b4 = ee.Algorithms.If(d.contains('b4'), d.get('b4'), d.get('s2_b4'));
+    var b5 = ee.Algorithms.If(d.contains('b5'), d.get('b5'), d.get('s2_b5'));
+    var b6 = ee.Algorithms.If(d.contains('b6'), d.get('b6'), d.get('s2_b6'));
+    var b7 = ee.Algorithms.If(d.contains('b7'), d.get('b7'), d.get('s2_b7'));
+    var b8 = ee.Algorithms.If(d.contains('b8'), d.get('b8'), d.get('s2_b8'));
+    var b11 = ee.Algorithms.If(d.contains('b11'), d.get('b11'), d.get('s2_b11'));
+    var b12 = ee.Algorithms.If(d.contains('b12'), d.get('b12'), d.get('s2_b12'));
+
+    // S1 SAR Bands
+    var vv = ee.Algorithms.If(d.contains('vv'), d.get('vv'), d.get('s1_vv'));
+    var vh = ee.Algorithms.If(d.contains('vh'), d.get('vh'), d.get('s1_vh'));
+    var vv_cont = ee.Algorithms.If(d.contains('vv_cont'), d.get('vv_cont'),
+        ee.Algorithms.If(d.contains('vv_contrast'), d.get('vv_contrast'),
+        ee.Algorithms.If(d.contains('s1_vv_cont'), d.get('s1_vv_cont'), d.get('s1_vv_contrast'))));
+    var vv_ent = ee.Algorithms.If(d.contains('vv_ent'), d.get('vv_ent'), d.get('s1_vv_ent'));
+    var vv_corr = ee.Algorithms.If(d.contains('vv_corr'), d.get('vv_corr'), d.get('s1_vv_corr'));
+    var vh_cont = ee.Algorithms.If(d.contains('vh_cont'), d.get('vh_cont'),
+        ee.Algorithms.If(d.contains('vh_contrast'), d.get('vh_contrast'),
+        ee.Algorithms.If(d.contains('s1_vh_cont'), d.get('s1_vh_cont'), d.get('s1_vh_contrast'))));
+    var vh_ent = ee.Algorithms.If(d.contains('vh_ent'), d.get('vh_ent'), d.get('s1_vh_ent'));
+    var vh_corr = ee.Algorithms.If(d.contains('vh_corr'), d.get('vh_corr'), d.get('s1_vh_corr'));
+
+    var targetVal = ee.Algorithms.If(d.contains('agbd'), d.get('agbd'), d.get('AGBD'));
+    var slope = ee.Algorithms.If(d.contains('slope'), d.get('slope'), d.get('Slope'));
+
+    return f.set({
+        'b2': b2, 'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b11': b11, 'b12': b12,
+        'vv': vv, 'vh': vh,
+        'vv_cont': vv_cont, 'vv_ent': vv_ent, 'vv_corr': vv_corr,
+        'vh_cont': vh_cont, 'vh_ent': vh_ent, 'vh_corr': vh_corr,
+        'agbd': targetVal, 'slope': slope
+    });
+});
+
+var totalRaw = standardizedDataset.size();
+
+var slopeFiltered = standardizedDataset.filter(ee.Filter.lte('slope', MAX_SLOPE_DEG));
 
 var cleanDataset = slopeFiltered
     .filter(ee.Filter.notNull([TARGET]))
@@ -53,9 +90,9 @@ print('   - Total Sampel Bersih & Valid    :', cleanDataset.size());
 print('2. Total Fitur Prediktor            :', FEATURES.length);
 print('3. Variabel Target                  :', TARGET, '(Aboveground Biomass Density, Mg/ha)');
 
-// =============================================================
+// -------------------------------------------------------------
 // SPATIAL SPLIT (BEBAS DATA LEAKAGE)
-// =============================================================
+// -------------------------------------------------------------
 var trainSet;
 var testSet;
 
@@ -75,9 +112,9 @@ if (SPLIT_METHOD === 'SPATIAL') {
 print('   - Jumlah Sampel Training:', trainSet.size());
 print('   - Jumlah Sampel Testing :', testSet.size());
 
-// =============================================================
+// -------------------------------------------------------------
 // PELATIHAN MODEL RANDOM FOREST
-// =============================================================
+// -------------------------------------------------------------
 var rfModel = ee.Classifier.smileRandomForest({
     numberOfTrees: RF_PARAMS.numberOfTrees,
     variablesPerSplit: RF_PARAMS.variablesPerSplit,
@@ -94,15 +131,15 @@ var rfModel = ee.Classifier.smileRandomForest({
 
 print('5. Model Berhasil Dilatih: Random Forest Regressor (AGBD)');
 
-// =============================================================
+// -------------------------------------------------------------
 // PREDIKSI TRAINING DAN TESTING
-// =============================================================
+// -------------------------------------------------------------
 var trainPred = trainSet.classify(rfModel, 'predicted');
 var testPred = testSet.classify(rfModel, 'predicted');
 
-// =============================================================
+// -------------------------------------------------------------
 // FUNGSI: PERHITUNGAN METRIK EVALUASI
-// =============================================================
+// -------------------------------------------------------------
 function computeMetrics(fc, actualCol, predCol) {
     var n = fc.size();
     var meanActual = fc.aggregate_mean(actualCol);
@@ -145,9 +182,9 @@ function computeMetrics(fc, actualCol, predCol) {
     };
 }
 
-// =============================================================
+// -------------------------------------------------------------
 // EVALUASI DAN MONITORING HASIL
-// =============================================================
+// -------------------------------------------------------------
 var trainMetrics = computeMetrics(trainPred, TARGET, 'predicted');
 var testMetrics = computeMetrics(testPred, TARGET, 'predicted');
 
@@ -168,9 +205,9 @@ print('      Bias :', testMetrics.bias, 'Mg/ha');
 print('      %Bias:', testMetrics.pBias, '%');
 print('      rRMSE:', testMetrics.rRMSE, '%');
 
-// =============================================================
+// -------------------------------------------------------------
 // VISUALISASI GRAFIK SCATTER AKTUAL VS PREDIKSI
-// =============================================================
+// -------------------------------------------------------------
 // Ambil sampel representatif (maks 2500 titik) untuk rendering grafik di UI tanpa lag
 var scatterSample = testPred.limit(2500);
 
@@ -202,9 +239,9 @@ var scatterChart = ui.Chart.feature.byFeature({
 
 print(scatterChart);
 
-// =============================================================
+// -------------------------------------------------------------
 // VISUALISASI GRAFIK FEATURE IMPORTANCE
-// =============================================================
+// -------------------------------------------------------------
 var importance = rfModel.explain();
 var importanceValues = ee.Dictionary(ee.Dictionary(importance).get('importance'));
 
@@ -224,11 +261,45 @@ var importanceChart = ui.Chart.feature.byProperty({
 
 print(importanceChart);
 
-// =============================================================
+// -------------------------------------------------------------
 // EKSPOR MODEL RANDOM FOREST KE ASSET
-// =============================================================
+// -------------------------------------------------------------
 Export.classifier.toAsset({
     classifier: rfModel,
     description: 'Export_RF_AGBD_Model',
     assetId: 'users/sananta/rf_agbd_model'
+});
+
+// -------------------------------------------------------------
+// EKSPOR HASIL EVALUASI KE GOOGLE DRIVE
+// -------------------------------------------------------------
+var evalMetrics = ee.FeatureCollection([
+    ee.Feature(null, {
+        'split': 'training',
+        'target': TARGET,
+        'r2': trainMetrics.r2,
+        'rmse': trainMetrics.rmse,
+        'mae': trainMetrics.mae,
+        'bias': trainMetrics.bias,
+        'pbias': trainMetrics.pBias,
+        'rrmse': trainMetrics.rRMSE
+    }),
+    ee.Feature(null, {
+        'split': 'testing',
+        'target': TARGET,
+        'r2': testMetrics.r2,
+        'rmse': testMetrics.rmse,
+        'mae': testMetrics.mae,
+        'bias': testMetrics.bias,
+        'pbias': testMetrics.pBias,
+        'rrmse': testMetrics.rRMSE
+    })
+]);
+
+Export.table.toDrive({
+    collection: evalMetrics,
+    description: 'Export_Evaluation_Metrics_AGBD',
+    folder: 'GEE_Exports',
+    fileNamePrefix: 'agbd_model_evaluation_metrics',
+    fileFormat: 'CSV'
 });

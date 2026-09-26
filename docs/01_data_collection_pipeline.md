@@ -1,119 +1,138 @@
 <div align="center">
 
-# DOKUMENTASI PENGUMPULAN DATA DAN REKAYASA FITUR MULTIMODAL
-### Integrasi Sensor Optik (Sentinel-2), SAR (Sentinel-1), Topografi (GLO-30), Tutupan Lahan (Dynamic World), dan Spaceborne LiDAR (GEDI L4A)
-**Studi Kasus: Pemetaan HCS Kabupaten Bogor, Jawa Barat**
+# PANDUAN METODOLOGI PENGUMPULAN DATA DAN REKAYASA FITUR MULTIMODAL
+### Integrasi Sensor Optik (Sentinel-2 MSI), Radar Apertur Sintesis (Sentinel-1 SAR C-Band), Model Elevasi Digital (Copernicus GLO-30 DEM), Tutupan Lahan Probabilistik (Dynamic World), dan Spaceborne LiDAR (GEDI L4A/L2A)
+**Studi Kasus: Pemodelan Biomassa dan Stratifikasi HCS Kabupaten Bogor, Jawa Barat**
 
 ---
 
-<img src="../assets/data_pipeline_flowchart.png" alt="[Placeholder] Diagram Alir Pipeline Akuisisi dan Fusi Multimodal" width="850"/>
+<img src="../assets/data_pipeline_flowchart.png" alt="Diagram Alir Pipeline Akuisisi dan Fusi Multimodal" width="850"/>
 
-<p><em>Gambar 1: Alur Pemrosesan Fusi Citra Satelit Multimodal dan Ekstraksi Sampel GEDI pada Google Earth Engine</em></p>
+<p><em>Gambar 1: Alur Kerja Fusi Citra Satelit Multimodal dan Ekstraksi Sampel GEDI pada Google Earth Engine</em></p>
 
 </div>
 
 ---
 
-## 1. Gambaran Umum
+## 1. Pendahuluan dan Latar Belakang
 
-Pipeline data collection ini dirancang untuk mengatasi tantangan karakteristik lanskap tropis di Kabupaten Bogor—seperti tingginya persistensi tutupan awan sepanjang tahun serta variasi kelerengan curam di kawasan hulu Gunung Salak dan Gunung Gede Pangrango. Keterbatasan sensor optik tunggal yang cepat mengalami kejenuhan spektral (*spectral saturation*) pada tutupan kanopi lebat (>150–200 Mg/ha) diatasi dengan menyinergikan data radar gelombang mikro (Sentinel-1 SAR C-band), metrik struktur kanopi LiDAR (GEDI L4A/L2A), topografi digital (Copernicus GLO-30 DEM), dan probabilitas tutupan lahan berbasis deep learning (Dynamic World).
+Pemetaan stok karbon di atas permukaan (*Aboveground Biomass Density* - AGBD) dan tinggi kanopi (*Canopy Height*) pada lanskap tropis menghadapi tantangan biofisik yang kompleks. Kabupaten Bogor memiliki topografi heterogen—mulai dari dataran aluvial di bagian utara hingga kawasan pegunungan curam di lereng Gunung Salak dan Gunung Gede Pangrango di bagian selatan—serta persistensi tutupan awan yang sangat tinggi sepanjang tahun.
 
-Seluruh tahapan pra-pemrosesan citra, koreksi radiometrik, penyelarasan resolusi spasial (30 meter), komposit kuartalan, hingga ekstraksi sampel geospasial dieksekusi secara terdistribusi di cloud platform **Google Earth Engine (GEE)**.
+Pendekatan berbasis sensor tunggal memiliki kelemahan inheren:
+1. **Sensor Optik Pasif:** Mengalami kejenuhan spektral (*spectral saturation*) pada tutupan tajuk rapat dan biomassa tinggi (>150–200 Mg/ha), serta sangat rentan terhadap kontaminasi awan dan bayangan awan.
+2. **Sensor Radar Apertur Sintesis (SAR):** Memiliki kemampuan menembus awan dan peka terhadap hamburan volume kanopi (*volume scattering*), namun terdistorsi oleh efek geometri lereng (*layover*, *foreshortening*, dan *shadowing*).
+3. **Sensor LiDAR Antariksa (GEDI):** Menyediakan estimasi struktur vertikal dan biomassa berkepresisian tinggi, tetapi distribusinya bersifat diskret (*footprint sampling* berjarak) dan tidak menghasilkan citra spasial kontinu.
+
+Untuk mengatasi limitasi tersebut, dirancang metodologi fusi data multimodal terdistribusi berbasis **Google Earth Engine (GEE)**. Pipeline ini mengintegrasikan data *spaceborne* LiDAR GEDI (L4A dan L2A) sebagai target label referensi, citra optik multispektral Sentinel-2 MSI, citra radar Sentinel-1 SAR C-band, data elevasi topografi Copernicus GLO-30 DEM, dan produk tutupan lahan Dynamic World. Seluruh data diselaraskan ke dalam resolusi spasial standar 30 meter pada sistem proyeksi Universal Transverse Mercator (UTM) Zona 48S (EPSG:32648).
 
 ---
 
-## 2. Karakteristik dan Sumber Data Mentah
+## 2. Spesifikasi dan Sumber Data Akuisisi
 
-| No | Sensor / Misi Satelit | Produk Data | Domain / Tipe Sensor | Resolusi Asli | Penyedia / Katalog GEE |
+Data mentah yang digunakan bersumber dari katalog data geospasial terbuka yang diakses melalui antarmuka komputasi awan Google Earth Engine:
+
+| No | Misi / Sensor Satelit | Produk Data | Domain Spektral / Sensor | Resolusi Spasial Asli | Penyedia / Katalog Google Earth Engine |
 |:--:|:---|:---|:---|:---:|:---|
-| **1** | **GEDI (ISS)** | L4A Footprint AGBD & L2A RH Metrics | Spaceborne LiDAR Gelombang Penuh (1064 nm) | Titik sampel footprint 25 m | NASA ORNL DAAC / `LARSE/GEDI/GEDI04_A_002_MONTHLY` |
-| **2** | **Sentinel-2 MSI** | Level-2A Surface Reflectance (Harmonized) | Multispektral Optik (VNIR, Red Edge, SWIR) | 10 m, 20 m | ESA / `COPERNICUS/S2_SR_HARMONIZED` |
-| **3** | **Sentinel-1** | C-SAR Level-1 GRD (Interferometric Wide) | Radar Apertur Sintesis Gelombang Mikro C-band | 10 m (spacing) | ESA / `COPERNICUS/S1_GRD` |
-| **4** | **Copernicus DEM** | GLO-30 Digital Elevation Model | Radar Interferometri X-band / Topografi | 30 m | ESA / `COPERNICUS/DEM/GLO30` |
-| **5** | **Dynamic World** | V1 Near Real-Time Land Cover | Deep Learning Probabilistic Land Cover (10m) | 10 m | Google / WRI / `GOOGLE/DYNAMICWORLD/V1` |
-| **6** | **Cloud Score Plus** | S2_HARMONIZED Cloud Score+ V1 | Masking Awan dan Bayangan Kualitas Tinggi | 10 m | Google / `GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED` |
+| **1** | **GEDI (ISS)** | L4A Footprint AGBD (v002) & L2A RH98 | Full-Waveform Spaceborne LiDAR (1.064 nm) | Footprint diameter ~25 m | NASA ORNL DAAC / `LARSE/GEDI/GEDI04_A_002_MONTHLY` & `LARSE/GEDI/GEDI02_A_002_MONTHLY` |
+| **2** | **Sentinel-2 MSI** | Level-2A Surface Reflectance (Harmonized) | Multispektral Optik (VNIR, Red Edge, SWIR) | 10 m, 20 m | ESA Copernicus / `COPERNICUS/S2_SR_HARMONIZED` |
+| **3** | **Cloud Score Plus** | S2_HARMONIZED Cloud Score+ (v1) | Model Penilaian Kualitas Piksel dan Awan | 10 m | Google / `GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED` |
+| **4** | **Sentinel-1** | C-SAR Level-1 GRD (Interferometric Wide) | Radar Gelombang Mikro C-Band (5,405 GHz) | 10 m (pixel spacing) | ESA Copernicus / `COPERNICUS/S1_GRD` |
+| **5** | **Copernicus DEM** | GLO-30 Global Digital Elevation Model | Radar Interferometri X-Band (Topografi) | 30 m | ESA Copernicus / `COPERNICUS/DEM/GLO30` |
+| **6** | **Dynamic World** | V1 Near Real-Time Land Cover | Deep Learning Probabilistic Land Cover | 10 m | Google & WRI / `GOOGLE/DYNAMICWORLD/V1` |
 
 ---
 
-## 3. Matriks Fitur Prediktor (38 Fitur)
+## 3. Matriks Fitur Prediktor Model (34 Fitur)
 
-Sebanyak 38 variabel prediktor diekstraksi untuk setiap piksel 30 m di Kabupaten Bogor guna menangkap aspek biokimiawi daun, geometri struktur vertikal pohon, kekasaran tajuk, elevasi mikro, dan komposisi tutupan lahan.
+Berdasarkan arsitektur ekstraksi fitur pada repositori (`src/inference_agbd.js`, `src/inference_canopy_height.js`, dan `src/modelling_agbd.js`), sebanyak **34 variabel prediktor kontinu** diekstraksi pada resolusi spasial 30 meter untuk menyusun dataset pelatihan dan inferensi spasial:
 
-| No | Nama Fitur | Sumber Data | Resolusi | Fungsi Biofisik & Signifikansi dalam Prediksi |
-|:--:|:---|:---|:---:|:---|
-| 1–9 | `s2_b2`, `s2_b3`, `s2_b4`, `s2_b5`, `s2_b6`, `s2_b7`, `s2_b8`, `s2_b11`, `s2_b12` | Sentinel-2 MSI | 10–20 m | Reflektansi spektral dasar (Biru, Hijau, Merah, 3 Red Edge, NIR, 2 SWIR). Mengukur absorpsi klorofil, transisi kanopi, dan kadar air daun. |
-| 10 | `ndvi` | Sentinel-2 | 10 m | *Normalized Difference Vegetation Index*: Mengukur kehijauan vegetasi pada biomassa rendah hingga sedang. |
-| 11 | `evi` | Sentinel-2 | 10 m | *Enhanced Vegetation Index*: Mereduksi pengaruh reflektansi latar tanah dan aerosol atmosfer; menunda saturasi optik kanopi lebat. |
-| 12 | `ndre` | Sentinel-2 | 20 m | *Normalized Difference Red Edge*: Sangat peka terhadap akumulasi klorofil dan biomassa tahap lanjut tanpa cepat jenuh. |
-| 13 | `ireci` | Sentinel-2 | 20 m | *Inverted Red-Edge Chlorophyll Index* ($(\text{RE3} - \text{Red}) / (\text{RE1}/\text{RE2})$): Indikator ketebalan lapisan daun dan luas kanopi; fitur optik peringkat teratas. |
-| 14 | `gao_ndwi` | Sentinel-2 | 20 m | *Gao Normalized Difference Water Index* ($(\text{NIR} - \text{SWIR1})/(\text{NIR} + \text{SWIR1})$): Mengukur kadar air kanopi cairan dan kelembapan tajuk. |
-| 15–17 | `ireci_contrast`, `ireci_ent`, `ireci_corr` | Sentinel-2 GLCM | 20 m | Tekstur spasial *Gray-Level Co-occurrence Matrix* (ukuran kernel 5 piksel) pada pita IRECI. Menangkap heterogenitas struktural kanopi dan bukaan tajuk. |
-| 18–20 | `swir_contrast`, `swir_ent`, `swir_corr` | Sentinel-2 GLCM | 20 m | Tekstur GLCM pada saluran SWIR1 (B11). Mengkuantifikasi bayangan antar-pohon dan variasi fraksi kayu tidak berfotosintesis. |
-| 21–22 | `vv`, `vh` | Sentinel-1 SAR | 10 m | Koefisien hamburan balik radar dalam skala decibel (dB). Saluran silang-polarisasi VH sangat peka terhadap hamburan volume (*volume scattering*) ranting dan kanopi. |
-| 23–25 | `vv_contrast`, `vv_ent`, `vv_corr` | Sentinel-1 GLCM | 10 m | Tekstur spasial GLCM polarisasi ko-polarisasi VV. Mengukur kekasaran permukaan tajuk hutan dan arsitektur tanah/tegakan. |
-| 26–28 | `vh_contrast`, `vh_ent`, `vh_corr` | Sentinel-1 GLCM | 10 m | Tekstur spasial GLCM polarisasi silang VH. Membedakan gradasi kerapatan tutupan hutan primer dari hutan sekunder muda. |
-| 29 | `dem` | GLO-30 | 30 m | Elevasi absolut (meter dpl). Mengontrol zonasi iklim mikro pegunungan dan komposisi floristik hutan tropis basah. |
-| 30 | `slope` | GLO-30 | 30 m | Kemiringan lereng (derajat). Mempengaruhi retensi kelembapan tanah, erosi substrat, dan batasan operasional LiDAR. |
-| 31 | `aspect` | GLO-30 | 30 m | Arah hadap lereng (derajat radian). Merefleksikan insolasi radiasi matahari dan rezim penguapan lokal. |
-| 32–39 | `water`, `trees`, `grass`, `flooded_veg`, `crops`, `shrub_scrub`, `built`, `bareland` | Dynamic World | 10 m | Probabilitas keanggotaan piksel untuk 8 kelas tutupan lahan. Memberikan batas probabilitas kontinu terhadap tipe ekosistem non-hutan. |
+| No | Kategori Fitur | Variabel Prediktor | Sumber Sensor | Resolusi Spasial | Signifikansi Biofisik dan Peran dalam Prediksi |
+|:--:|:---|:---|:---|:---:|:---|
+| **1–9** | **Pita Spektral Dasar** | `b2`, `b3`, `b4`, `b5`, `b6`, `b7`, `b8`, `b11`, `b12` | Sentinel-2 MSI | 10–20 m | Reflektansi permukaan dasar (Biru, Hijau, Merah, 3 Red Edge, NIR, SWIR-1, dan SWIR-2). Menangkap spektrum penyerapan klorofil, transisi kanopi berkayu, dan kadar air dedaunan. |
+| **10** | **Indeks Vegetasi** | `ndvi` | Sentinel-2 | 10 m | *Normalized Difference Vegetation Index* ($(\text{NIR} - \text{Red}) / (\text{NIR} + \text{Red})$): Mengukur kehijauan kanopi dan biomassa pada tingkat kerapatan rendah hingga menengah. |
+| **11** | **Indeks Vegetasi** | `gndvi` | Sentinel-2 | 10 m | *Green Normalized Difference Vegetation Index* ($(\text{NIR} - \text{Green}) / (\text{NIR} + \text{Green})$): Lebih sensitif terhadap konsentrasi klorofil pada fase kanopi lebat dibandingkan NDVI. |
+| **12** | **Indeks Vegetasi** | `evi` | Sentinel-2 | 10 m | *Enhanced Vegetation Index*: Mereduksi pengaruh reflektansi latar belakang tanah dan hamburan aerosol atmosferik; menunda saturasi pada kanopi berkerapatan tinggi. |
+| **13** | **Indeks Red Edge** | `ireci` | Sentinel-2 | 20 m | *Inverted Red-Edge Chlorophyll Index* ($(\text{RE3} - \text{Red}) / (\text{RE1} / \text{RE2})$): Peka terhadap kandungan klorofil total dan indeks luas daun (*Leaf Area Index* - LAI). |
+| **14** | **Indeks Rasio** | `rvi` | Sentinel-2 | 10 m | *Ratio Vegetation Index* ($\text{NIR} / \text{Red}$): Responsif terhadap kepadatan biomassa dan struktur tegakan berkayu. |
+| **15** | **Indeks Kelembapan** | `gao_ndwi` | Sentinel-2 | 20 m | *Gao Normalized Difference Water Index* ($(\text{NIR} - \text{SWIR1}) / (\text{NIR} + \text{SWIR1})$): Mengukur kadar air cairan kanopi dan status turgiditas tajuk hutan. |
+| **16–17** | **Hamburan Balik Radar** | `vv`, `vh` | Sentinel-1 SAR | 10 m | Koefisien hamburan balik terkoreksi lereng ($\gamma^0$) dalam skala desibel (dB). Polarisasi silang VH sangat responsif terhadap hamburan volume kanopi pohon. |
+| **18–20** | **Tekstur Spasial SAR (VV)** | `vv_cont`, `vv_ent`, `vv_corr` | Sentinel-1 SAR (GLCM 5×5) | 10 m | Tekstur *Gray-Level Co-occurrence Matrix* (kontras, entropi, korelasi) pada kanal VV. Mengukur kekasaran permukaan tajuk dan struktur tegakan atas. |
+| **21–23** | **Tekstur Spasial SAR (VH)** | `vh_cont`, `vh_ent`, `vh_corr` | Sentinel-1 SAR (GLCM 5×5) | 10 m | Tekstur GLCM pada kanal VH. Membedakan heterogenitas internal kanopi hutan primer dari formasi hutan sekunder dan semak homogen. |
+| **24** | **Topografi** | `dem` | Copernicus GLO-30 | 30 m | Elevasi permukaan absolut (meter di atas permukaan laut). Menentukan gradien iklim mikro pegunungan dan zonasi vegetasi tropis. |
+| **25** | **Topografi** | `slope` | Copernicus GLO-30 | 30 m | Kemiringan lereng permukaan (derajat). Mempengaruhi retensi kelembapan tanah, ketebalan solum, dan potensi erosi lahan. |
+| **26** | **Topografi** | `aspect` | Copernicus GLO-30 | 30 m | Arah hadap lereng (derajat radian). Merefleksikan insolasi penyinaran radiasi matahari harian dan dinamika evapotranspirasi lokal. |
+| **27–34** | **Probabilitas Tutupan Lahan** | `water`, `trees`, `grass`, `flooded_veg`, `crops`, `shrub_scrub`, `built`, `bareland` | Dynamic World V1 | 10 m | Probabilitas keanggotaan kontinu (0,0–1,0) untuk 8 kelas ekosistem. Memberikan batasan probabilitas numerik terhadap non-vegetasi dan tipe tutupan lahan terbuka. |
 
 ---
 
-## 4. Alur Kerja Pengumpulan dan Pra-Pemrosesan Citra
+## 4. Metodologi Pra-Pemrosesan Citra Satelit
 
 <div align="center">
 
-<img src="../assets/data_fusion_diagram.png" alt="[Placeholder] Skema Fusi Data Sentinel-1, Sentinel-2, dan GEDI" width="800"/>
+<img src="../assets/data_fusion_diagram.png" alt="Skema Fusi Data Sentinel-1, Sentinel-2, dan GEDI" width="800"/>
 
-<p><em>Gambar 2: Skema Koreksi Radiometrik SAR dan Masking Awan Multispektral</em></p>
+<p><em>Gambar 2: Skema Koreksi Radiometrik SAR C-Band dan Masking Awan Multispektral</em></p>
 
 </div>
 
-### 4.1 Pemulihan Batas Geometri & Indeks Wilayah
-- Rekonstruksi geometri titik sampel dari atribut tabular (`longitude`, `latitude`) pada Google Earth Engine.
-- Pembentukan batas kawasan (*overall bounding box*) dari seluruh titik target untuk mengoptimasi query spatial katalog citra satelit secara terindeks.
+### 4.1 Pemulihan Batas Geometri dan Wilayah Kajian
+1. **Rekonstruksi Koordinat:** Geometri titik sampel direkonstruksi dari atribut numerik bujur (*longitude*) dan lintang (*latitude*) menggunakan fungsi `ee.Geometry.Point()`.
+2. **Pembatasan Batas Spasial (*Spatial Bounding Box*):** Menggabungkan seluruh geometri titik target ke dalam poligon pembatas tunggal (*overall bounds*) guna mengoptimasi komputasi kueri katalog citra di server Google Earth Engine secara terindeks.
 
-### 4.2 Pra-Pemrosesan Sentinel-2 Multispektral
-- **Filtrasi Tutupan Awan:** Memilih citra dengan persentase awan di bawah 70% (`CLOUDY_PIXEL_PERCENTAGE < 70`).
-- **Masking Kualitas Piksel:** Menggunakan `GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED` dengan ambang `cs >= 0.60` untuk menyaring awan tipis, awan tebal, dan bayangan awan secara ketat.
-- **Harmonisasi Reflektansi:** Skalar reflektansi dikalikan dengan faktor $0.0001$.
-- **Perhitungan Indeks Spektral:** NDVI, EVI, NDRE, IRECI, dan Gao-NDWI dihitung pada setiap scene.
+### 4.2 Pra-Pemrosesan Citra Optik Sentinel-2 MSI
+1. **Penapisan Awal Tutupan Awan:** Memilih scene citra dengan persentase tutupan awan keseluruhan di bawah 70% (`CLOUDY_PIXEL_PERCENTAGE < 70`).
+2. **Penapisan Piksel Berkualitas Tinggi (Cloud Score Plus):** Mengintegrasikan koleksi `GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED`. Hanya piksel dengan skor bebas awan dan bebas bayangan awan $\ge 0,60$ (`cs >= 0.60`) yang dipertahankan.
+3. **Harmonisasi Skala Reflektansi:** Nilai reflektansi digital dikalikan faktor skala $0,0001$ untuk mengembalikan rentang fisik reflektansi permukaan ($0,0 - 1,0$).
+4. **Transformasi Indeks Spektral:** Menghitung 6 indeks biofisik (NDVI, GNDVI, EVI, IRECI, RVI, dan Gao-NDWI) secara serentak pada setiap scene citra.
+5. **Komposisi Temporal Kuartalan:** Membentuk komposit median pada setiap kuartal observasi (*quarterly median composite*) untuk mengisi kekosongan akibat penapisan awan (*unmasking* dengan komposit tahunan/baseline). Citra diinterpolasi menggunakan teknik *bilinear resampling* pada resolusi 30 meter.
 
-### 4.3 Pra-Pemrosesan Sentinel-1 SAR C-Band
-- **Filtrasi Metadata:** Menggunakan mode instrumen *Interferometric Wide* (IW), polarisasi ganda (VV + VH), dan membatasi pada lintasan orbit **`DESCENDING`** guna menyeragamkan geometri penembakan sudut datang (*look angle*) serta memotong separuh volume tumpukan data.
-- **Radiometric Terrain Flattening (Mullissa et al., 2021):** Mengoreksi variasi geometri lereng topografi menggunakan model SRTM/GLO-30 DEM. Menghitung sudut orientasi lokal (*Local Incidence Angle* - LIA) terhadap normal lereng permukaan untuk menghasilkan koefisien hamburan balik bebas distorsi lereng ($\gamma^0$).
-- **Optimasi Konversi Skala Linier:** Menghindari konversi bolak-balik berulang antara Decibel (dB) dan Power Linier. Komposit multi-temporal dihitung pada domain daya linier:
-  $$\text{Power}_{\text{lin}} = 10^{(\gamma^0_{\text{dB}} / 10)}$$
-- **Speckle Filtering Multi-Temporal:** Reduksi derau *speckle* dilakukan melalui agregasi temporal median kuartalan, diikuti filter konvolusi spasial boxcar $3 \times 3$ yang dieksekusi **hanya 1 kali** pada citra komposit kuartalan.
+### 4.3 Pra-Pemrosesan Radar Sentinel-1 SAR C-Band
+1. **Penapisan Mode Instrumen dan Orbit:** Menggunakan mode instrumen *Interferometric Wide* (IW) dengan polarisasi ganda (VV dan VH). Penapisan dibatasi khusus pada lintasan orbit **`DESCENDING`** guna menyeragamkan geometri penyinaran sudut datang (*incident look angle*) dan menghindari variasi temporal antar-orbit.
+2. **Koreksi Efek Lereng Topografi (*Radiometric Terrain Flattening*):** Mengimplementasikan algoritma Mullissa et al. (2021) dengan memanfaatkan model elevasi digital SRTM/GLO-30 DEM. Sudut pandang satelit dikorelasikan dengan sudut kemiringan (*slope*) dan arah lereng (*aspect*) permukaan untuk menghitung *Local Incidence Angle* (LIA). Hasil koreksi ditransformasikan menjadi koefisien hamburan balik bebas distorsi lereng ($\gamma^0$).
+3. **Optimasi Domain Daya Linier:** Mereduksi eror komputasi desibel dengan mengonversi nilai desibel ke daya linier (*linear power*) sebelum agregasi temporal:
+   $$\text{Power}_{\text{lin}} = 10^{(\gamma^0_{\text{dB}} / 10)}$$
+4. **Pereduksian Derau Bintik (*Speckle Filtering*):** Derau bintik diredam melalui reduksi agregasi median kuartalan pada domain linier, dilanjutkan dengan konvolusi spasial *boxcar* $3 \times 3$ yang dieksekusi **satu kali** sebelum dikembalikan ke skala logaritmik desibel (dB).
+5. **Ekstraksi Tekstur Spasial GLCM:** Citra kanal VV dan VH diskalakan ke rentang 6-bit (0–63) tipe *byte*, kemudian diekstraksi tekstur *Gray-Level Co-occurrence Matrix* berukuran jendela $5 \times 5$ piksel untuk menghitung parameter kontras (*contrast*), entropi (*entropy*), dan korelasi (*correlation*).
 
-### 4.4 Integrasi Topografi dan Dynamic World
-- Ekstraksi kemiringan lereng (*slope*) dan arah lereng (*aspect*) menggunakan algoritma Horn dari Copernicus GLO-30 DEM.
-- Agregasi probabilitas 8 kelas Dynamic World yang telah difilter bebas awan ke dalam rentang waktu observasi.
+### 4.4 Integrasi Data Topografi dan Dynamic World
+1. **Variabel Medan Copernicus GLO-30 DEM:** Nilai ketinggian absolut (`dem`) diselaraskan ke proyeksi target EPSG:32648 resolusi 30 meter. Algoritma Horn (1981) diterapkan melalui `ee.Terrain.products()` untuk mengekstraksi nilai kemiringan lereng (`slope`) dalam derajat dan arah hadap lereng (`aspect`) dalam derajat radian.
+2. **Komposisi Multitemporal Dynamic World:** Mengagregasi 8 pita probabilitas kontinu tutupan lahan Dynamic World melalui rata-rata kuartalan/tahunan (*temporal mean composite*) dengan interpolasi bilinear pada grid 30 meter.
 
 ---
 
-## 5. Strategi Penapisan Kualitas GEDI L4A dan Sampling Geospasial
+## 5. Protokol Penapisan Kualitas GEDI dan Strategi Pengambilan Sampel
 
 <div align="center">
 
-<img src="../assets/gedi_filtering_hexgrid.png" alt="[Placeholder] Ilustrasi Penapisan GEDI dan Partisi Grid Heksagonal" width="850"/>
+<img src="../assets/gedi_filtering_hexgrid.png" alt="Ilustrasi Penapisan GEDI dan Partisi Grid Heksagonal" width="850"/>
 
-<p><em>Gambar 3: Penapisan Footprint GEDI L4A dan Stratifikasi Partisi Heksagonal 5 km</em></p>
+<p><em>Gambar 3: Skema Penapisan Kualitas Footprint GEDI L4A/L2A dan Penyeimbangan Sampel Grid Heksagonal</em></p>
 
 </div>
 
-Untuk menjamin kualitas label target dan mencegah kesalahan propagasi ke model pembelajaran mesin, titik-titik sampel GEDI L4A melewati protokol penapisan berlapis:
+Untuk memastikan integritas data latih dan mencegah perambatan bias pada model pembelajaran mesin (*machine learning*), titik sampel footprint LiDAR GEDI disaring secara ketat melalui tahapan sistematis berikut (diimplementasikan pada `src/data_collection/gedi.js`):
 
-1. **Penapisan Integritas Laser:**
-   - `quality_flag == 1`: Menjamin keberhasilan algoritma penjejakan elevasi tanah dan profil vertikal.
-   - `degrade_flag == 0`: Memastikan tidak ada degradasi kualitas transmisi akibat orientasi satelit ISS atau getaran wahana.
-2. **Penyaringan Waktu Akuisisi (Solar Elevation):**
-   - Hanya mempertahankan data yang diambil pada kondisi malam hari (`solar_elevation < 0` derajat). Hal ini meminimalkan derau latar belakang radiasi matahari (*solar background noise*) dan meningkatkan *Signal-to-Noise Ratio* (SNR) waveform.
-3. **Penyaringan Lereng Ekstrem:**
-   - Menolak titik observasi dengan kemiringan lereng $\text{slope} > 35^\circ$. Pada lereng yang sangat curam, footprint laser selebar 25 m mengalami pelebaran waveform semu (*waveform broadening*) yang menghasilkan estimasi biomassa over-estimasi.
-4. **Pembangkitan Hexagonal Spatial Grid:**
-   - Membangkitkan kisi-kisi heksagonal dengan diameter 5.000 meter di atas wilayah Kabupaten Bogor (`create_hexgrid.py`).
-   - Setiap titik GEDI diasosiasikan dengan atribut pengenal blok spasial (`hex_id`). Skema ini digunakan sebagai dasar partisi data training-testing bebas autokorelasi spasial.
+### 5.1 Kriteria Penapisan Kualitas Sinyal Laser (Signal Quality Flags)
+1. **Penapisan GEDI L4A (AGBD):**
+   - `l4_quality_flag == 1`: Menjamin algoritma pemodelan biomassa GEDI L4A berjalan konvergen tanpa eror penjejakan permukaan tanah.
+   - `degrade_flag == 0`: Memastikan tidak terjadi degradasi akurasi navigasi satelit ISS atau ketidakstabilan posisi sensor pada orbit.
+   - `l2_quality_flag == 1`: Memastikan profil waveform kanopi vertikal dari produk L2A berstatus valid.
+   - `sensitivity >= 0.90`: Memastikan sensitivitas penetrasi pulsa laser mampu menembus tajuk vegetasi hingga permukaan tanah dengan tingkat keyakinan minimal 90%.
+   - `agbd > 0`: Mengeliminasi nilai biomassa kosong atau tidak terdefinisi.
+2. **Penapisan GEDI L2A (RH98 - Tinggi Kanopi):**
+   - `quality_flag == 1`: Menjamin akurasi deteksi puncak kanopi dan pantulan tanah.
+   - `degrade_flag == 0`: Bebas dari gangguan orbit atau atenuasi atmosferik.
+   - `sensitivity >= 0.90`: Tingkat sensitivitas penetrasi gelombang laser $\ge 90\%$.
+   - `rh98 > 0`: Memastikan ketinggian relatif persentil ke-98 bernilai positif.
+
+### 5.2 Penapisan Tutupan Lahan Vegetasi (Dynamic World Masking)
+- Sampel GEDI disaring silang menggunakan peta tutupan lahan Dynamic World. Hanya titik sampel yang berada pada kelas vegetasi (`dw_label` antara kelas 1 hingga 5: *trees*, *grass*, *flooded_vegetation*, *crops*, dan *shrub_and_scrub*) yang dipertahankan.
+- Piksel non-vegetasi (badan air, kawasan terbangun, lahan terbuka ekstrem, salju/es) dimasker secara otomatis untuk menghindari kontaminasi spektral pada dataset pemodelan vegetasi berkayu.
+
+### 5.3 Penyeimbangan Spasial Menggunakan Kisi Heksagonal (Spatial Grid Balancing)
+- Jalur orbit stasiun luar angkasa ISS menyebabkan penumpukan footprint GEDI yang sangat rapat di sepanjang lintasan sensor (*along-track clustering*), sementara area antar-lintasan (*across-track*) memiliki kerapatan sampel yang lebih renggang.
+- Untuk mengeliminasi bias autokorelasi spasial dan *oversampling* lokal, seluruh wilayah Kabupaten Bogor dipartisi ke dalam kisi heksagonal berukuran 5.000 meter.
+- Jumlah sampel acak per sel heksagonal dibatasi secara proporsional (`MAX_SAMPLES_PER_HEX = 100`, `RANDOM_SEED = 42`) menggunakan algoritma `limitSamplesPerGrid()`. Metode ini menjamin representasi spasial yang seragam di seluruh bentang alam Kabupaten Bogor.
 
 ---
 
@@ -123,4 +142,5 @@ Untuk menjamin kualitas label target dan mencegah kesalahan propagasi ke model p
 - **[2]** A. Mullissa et al., "Sentinel-1 SAR Backscatter Analysis Ready Data Preparation in Google Earth Engine," *Remote Sensing*, vol. 13, no. 10, p. 1954, 2021.
 - **[3]** C. F. Brown et al., "Dynamic World, Near real-time global 10 m land use land cover mapping," *Scientific Data*, vol. 9, no. 1, p. 251, 2022.
 - **[4]** R. Dubayah et al., "The Global Ecosystem Dynamics Investigation: High-resolution laser ranging of the Earth's forests and topography," *Science of Remote Sensing*, vol. 1, p. 100002, 2020.
-- **[5]** N. Lang et al., "A high-resolution canopy height model of the Earth," *Nature Ecology & Evolution*, vol. 7, pp. 1778–1789, 2023.
+- **[5]** B. K. P. Horn, "Hill shading and the reflectance map," *Proceedings of the IEEE*, vol. 69, no. 1, pp. 14–47, 1981.
+- **[6]** N. Lang et al., "A high-resolution canopy height model of the Earth," *Nature Ecology & Evolution*, vol. 7, pp. 1778–1789, 2023.

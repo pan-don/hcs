@@ -40,11 +40,15 @@ function buildAnnualLandcover(year, region) {
   var dwOverallMode = dwCol.select('label').mode();
 
   var composite = dwYearMode.unmask(dwOverallMode)
+    .unmask(255)
     .clip(region)
     .rename('landcover')
     .reproject({ crs: PARAMS.crs, scale: PARAMS.scale });
 
-  return composite.toByte();
+  return composite.toByte().set({
+    'landcover_class_values': DW_CLASSES.map(function (c) { return c.value; }).concat([255]),
+    'landcover_class_names': DW_CLASSES.map(function (c) { return c.name; }).concat(['No Data'])
+  });
 }
 
 // =============================================================
@@ -106,7 +110,25 @@ function printClassAreas(image, region, year) {
     bestEffort: true
   });
 
-  print('Ringkasan Luas Tutupan Lahan Tahun ' + year + ' (Hektar):', areaStats);
+  var labelDict = { '255': 'No Data' };
+  DW_CLASSES.forEach(function (c) {
+    labelDict[c.value.toString()] = c.name;
+  });
+  var classLabels = ee.Dictionary(labelDict);
+
+  var groups = ee.List(areaStats.get('groups'));
+  var attributeTable = ee.FeatureCollection(groups.map(function (item) {
+    var dict = ee.Dictionary(item);
+    var val = ee.Number(dict.get('class_value'));
+    var label = classLabels.get(val.format('%.0f'), 'Unknown');
+    return ee.Feature(null, {
+      'class_value': val,
+      'label': label,
+      'area_ha': dict.get('sum')
+    });
+  }));
+
+  print('Ringkasan Luas Tutupan Lahan Tahun ' + year + ' (Hektar):', attributeTable);
 }
 
 // =============================================================
@@ -115,12 +137,14 @@ function printClassAreas(image, region, year) {
 function exportLandcoverToDrive(image, region, year) {
   var fileName = PARAMS.exportFileName + '_' + year;
 
-  var meta = image.set({
+  var meta = image.unmask(255).set({
     'dataset': 'GOOGLE/DYNAMICWORLD/V1',
     'year': year,
     'scale_m': PARAMS.scale,
     'crs': PARAMS.crs,
-    'purpose': 'HCS Stratification Analysis'
+    'purpose': 'HCS Stratification Analysis',
+    'landcover_class_values': DW_CLASSES.map(function (c) { return c.value; }).concat([255]),
+    'landcover_class_names': DW_CLASSES.map(function (c) { return c.name; }).concat(['No Data'])
   });
 
   Export.image.toDrive({

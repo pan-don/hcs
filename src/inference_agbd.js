@@ -1,8 +1,9 @@
+// -------------------------------------------------------------
 // 1. KONFIGURASI GLOBAL
+// -------------------------------------------------------------
 var CFG = {
   MODEL_ASSET: 'users/sananta/rf_agbd_model',
-  TRAIN_DATASET: 'users/sananta/gedi_master_multimodal_dataset',
-  TARGET: 'agbd',
+  maskNonVegetation: true,
   years: [2021, 2022, 2023, 2024, 2025],
   scale: 30,
   crs: 'EPSG:32648',
@@ -15,13 +16,11 @@ var CFG = {
   exportDriveFolder: 'GEE_Exports',
   exportMaxPixels: 1e13,
   features: [
-    's2_b2', 's2_b3', 's2_b4', 's2_b5', 's2_b6', 's2_b7', 's2_b8', 's2_b11', 's2_b12',
-    'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
-    'ireci_contrast', 'ireci_ent', 'ireci_corr',
-    'swir_contrast', 'swir_ent', 'swir_corr',
-    's1_vv', 's1_vh',
-    's1_vv_contrast', 's1_vv_ent', 's1_vv_corr',
-    's1_vh_contrast', 's1_vh_ent', 's1_vh_corr',
+    'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b11', 'b12',
+    'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi',
+    'vv', 'vh',
+    'vv_cont', 'vv_ent', 'vv_corr',
+    'vh_cont', 'vh_ent', 'vh_corr',
     'dem', 'slope', 'aspect',
     'water', 'trees', 'grass', 'flooded_veg',
     'crops', 'shrub_scrub', 'built', 'bareland'
@@ -30,76 +29,18 @@ var CFG = {
 
 var aoi = typeof geometry !== 'undefined' ? geometry : Map.getBounds(true);
 
-// 2. LOAD ATAU AUTO-TRAIN MODEL RANDOM FOREST
-function getOrTrainModel() {
-  var model;
-  try {
-    model = ee.Classifier.load(CFG.MODEL_ASSET);
-    print('1. Status Model: Berhasil dimuat dari Asset (' + CFG.MODEL_ASSET + ')');
-  } catch (err) {
-    print('1. Status Model: Asset belum ada. Auto-training dari dataset...');
-    var masterData = ee.FeatureCollection(CFG.TRAIN_DATASET);
+// -------------------------------------------------------------
+// 2. LOAD MODEL RANDOM FOREST DARI ASSET
+// -------------------------------------------------------------
+var rfModel = ee.Classifier.load(CFG.MODEL_ASSET);
+print('1. Status Model: Berhasil dimuat dari Asset (' + CFG.MODEL_ASSET + ')');
 
-    var stdData = masterData.map(function (f) {
-      var d = f.toDictionary();
-      var s2_b2 = ee.Algorithms.If(d.contains('s2_b2'), d.get('s2_b2'), d.get('b2'));
-      var s2_b3 = ee.Algorithms.If(d.contains('s2_b3'), d.get('s2_b3'), d.get('b3'));
-      var s2_b4 = ee.Algorithms.If(d.contains('s2_b4'), d.get('s2_b4'), d.get('b4'));
-      var s2_b5 = ee.Algorithms.If(d.contains('s2_b5'), d.get('s2_b5'), d.get('b5'));
-      var s2_b6 = ee.Algorithms.If(d.contains('s2_b6'), d.get('s2_b6'), d.get('b6'));
-      var s2_b7 = ee.Algorithms.If(d.contains('s2_b7'), d.get('s2_b7'), d.get('b7'));
-      var s2_b8 = ee.Algorithms.If(d.contains('s2_b8'), d.get('s2_b8'), d.get('b8'));
-      var s2_b11 = ee.Algorithms.If(d.contains('s2_b11'), d.get('s2_b11'), d.get('b11'));
-      var s2_b12 = ee.Algorithms.If(d.contains('s2_b12'), d.get('s2_b12'), d.get('b12'));
-
-      var s1_vv = ee.Algorithms.If(d.contains('s1_vv'), d.get('s1_vv'), d.get('vv'));
-      var s1_vh = ee.Algorithms.If(d.contains('s1_vh'), d.get('s1_vh'), d.get('vh'));
-      var s1_vv_contrast = ee.Algorithms.If(d.contains('s1_vv_contrast'), d.get('s1_vv_contrast'), d.get('vv_contrast'));
-      var s1_vv_ent = ee.Algorithms.If(d.contains('s1_vv_ent'), d.get('s1_vv_ent'), d.get('vv_ent'));
-      var s1_vv_corr = ee.Algorithms.If(d.contains('s1_vv_corr'), d.get('s1_vv_corr'), d.get('vv_corr'));
-      var s1_vh_contrast = ee.Algorithms.If(d.contains('s1_vh_contrast'), d.get('s1_vh_contrast'), d.get('vh_contrast'));
-      var s1_vh_ent = ee.Algorithms.If(d.contains('s1_vh_ent'), d.get('s1_vh_ent'), d.get('vh_ent'));
-      var s1_vh_corr = ee.Algorithms.If(d.contains('s1_vh_corr'), d.get('s1_vh_corr'), d.get('vh_corr'));
-
-      var agbd = ee.Algorithms.If(d.contains('agbd'), d.get('agbd'), d.get('AGBD'));
-      var slope = ee.Algorithms.If(d.contains('slope'), d.get('slope'), d.get('Slope'));
-
-      return f.set({
-        's2_b2': s2_b2, 's2_b3': s2_b3, 's2_b4': s2_b4, 's2_b5': s2_b5,
-        's2_b6': s2_b6, 's2_b7': s2_b7, 's2_b8': s2_b8, 's2_b11': s2_b11, 's2_b12': s2_b12,
-        's1_vv': s1_vv, 's1_vh': s1_vh,
-        's1_vv_contrast': s1_vv_contrast, 's1_vv_ent': s1_vv_ent, 's1_vv_corr': s1_vv_corr,
-        's1_vh_contrast': s1_vh_contrast, 's1_vh_ent': s1_vh_ent, 's1_vh_corr': s1_vh_corr,
-        'agbd': agbd, 'slope': slope
-      });
-    }).filter(ee.Filter.notNull([CFG.TARGET]))
-      .filter(ee.Filter.gte(CFG.TARGET, 0))
-      .filter(ee.Filter.lte(CFG.TARGET, 1000))
-      .filter(ee.Filter.lte('slope', 35))
-      .filter(ee.Filter.notNull(CFG.features));
-
-    model = ee.Classifier.smileRandomForest({
-      numberOfTrees: 350,
-      minLeafPopulation: 5,
-      bagFraction: 0.632,
-      seed: 42
-    })
-      .setOutputMode('REGRESSION')
-      .train({
-        features: stdData,
-        classProperty: CFG.TARGET,
-        inputProperties: CFG.features
-      });
-    print('   - Model AGBD Berhasil Dilatih Secara Otomatis!');
-  }
-  return model;
-}
-
-var rfModel = getOrTrainModel();
-
+// -------------------------------------------------------------
 // 3. PRA-PEMROSESAN SENTINEL-2 MULTISPEKTRAL
+// -------------------------------------------------------------
 function calculateSpectralIndices(image) {
   var blue = image.select('B2');
+  var green = image.select('B3');
   var red = image.select('B4');
   var re1 = image.select('B5');
   var re2 = image.select('B6');
@@ -108,18 +49,19 @@ function calculateSpectralIndices(image) {
   var swir1 = image.select('B11');
 
   var ndvi = nir.subtract(red).divide(nir.add(red)).rename('ndvi');
+  var gndvi = nir.subtract(green).divide(nir.add(green)).rename('gndvi');
   var evi = image.expression(
     '2.5 * ((NIR - RED) / (NIR + 6.0 * RED - 7.5 * BLUE + 1.0))',
     { NIR: nir, RED: red, BLUE: blue }
   ).rename('evi');
-  var ndre = nir.subtract(re1).divide(nir.add(re1)).rename('ndre');
   var ireci = image.expression(
     '(RE3 - RED) / (RE1 / RE2)',
     { RE3: re3, RED: red, RE1: re1, RE2: re2 }
   ).rename('ireci');
+  var rvi = nir.divide(red).rename('rvi');
   var gaoNdwi = nir.subtract(swir1).divide(nir.add(swir1)).rename('gao_ndwi');
 
-  return image.addBands([ndvi, evi, ndre, ireci, gaoNdwi]);
+  return image.addBands([ndvi, gndvi, evi, ireci, rvi, gaoNdwi]);
 }
 
 function prepareSentinel2(image) {
@@ -127,18 +69,6 @@ function prepareSentinel2(image) {
   var scaled = image.select(opticalBands).multiply(0.0001);
   var clearMask = image.select('cs').gte(CFG.csThreshold);
   return image.addBands(scaled, null, true).updateMask(clearMask).select(opticalBands);
-}
-
-function extractS2GLCM(image) {
-  var ireciBins = image.select('ireci').unitScale(0.0, 1.2).multiply(63).toByte().rename('ireci');
-  var swirBins = image.select('B11').unitScale(0.02, 0.35).multiply(63).toByte().rename('swir');
-
-  var ireciGLCM = ireciBins.glcmTexture({ size: CFG.glcmSize })
-    .select(['ireci_contrast', 'ireci_ent', 'ireci_corr']);
-  var swirGLCM = swirBins.glcmTexture({ size: CFG.glcmSize })
-    .select(['swir_contrast', 'swir_ent', 'swir_corr']);
-
-  return image.addBands([ireciGLCM, swirGLCM]);
 }
 
 var s2Baseline = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
@@ -163,21 +93,19 @@ function buildS2Composite(year, region) {
 
   var s2Median = s2Col.median().unmask(s2Baseline);
 
-  return extractS2GLCM(s2Median)
+  return s2Median
     .resample('bilinear')
     .select(
       ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B11', 'B12',
-        'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
-        'ireci_contrast', 'ireci_ent', 'ireci_corr',
-        'swir_contrast', 'swir_ent', 'swir_corr'],
-      ['s2_b2', 's2_b3', 's2_b4', 's2_b5', 's2_b6', 's2_b7', 's2_b8', 's2_b11', 's2_b12',
-        'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
-        'ireci_contrast', 'ireci_ent', 'ireci_corr',
-        'swir_contrast', 'swir_ent', 'swir_corr']
+        'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi'],
+      ['b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b11', 'b12',
+        'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi']
     );
 }
 
+// -------------------------------------------------------------
 // 4. PRA-PEMROSESAN SENTINEL-1 SAR
+// -------------------------------------------------------------
 var s1Dem = ee.Image('USGS/SRTMGL1_003');
 var s1Terrain = ee.Terrain.products(s1Dem);
 var s1Slope = s1Terrain.select('slope').multiply(Math.PI / 180);
@@ -260,11 +188,13 @@ function buildS1Composite(year, region) {
     .resample('bilinear')
     .select(
       ['VV', 'VH', 'VV_contrast', 'VV_ent', 'VV_corr', 'VH_contrast', 'VH_ent', 'VH_corr'],
-      ['s1_vv', 's1_vh', 's1_vv_contrast', 's1_vv_ent', 's1_vv_corr', 's1_vh_contrast', 's1_vh_ent', 's1_vh_corr']
+      ['vv', 'vh', 'vv_cont', 'vv_ent', 'vv_corr', 'vh_cont', 'vh_ent', 'vh_corr']
     );
 }
 
+// -------------------------------------------------------------
 // 5. PRA-PEMROSESAN COPERNICUS GLO-30 DEM
+// -------------------------------------------------------------
 function buildDEMBands(region) {
   var collection = ee.ImageCollection('COPERNICUS/DEM/GLO30').filterBounds(region);
   var nativeProj = collection.first().projection();
@@ -276,7 +206,9 @@ function buildDEMBands(region) {
     .resample('bilinear');
 }
 
+// -------------------------------------------------------------
 // 6. PRA-PEMROSESAN DYNAMIC WORLD
+// -------------------------------------------------------------
 var DW_INPUT_BANDS = ['water', 'trees', 'grass', 'flooded_vegetation', 'crops', 'shrub_and_scrub', 'built', 'bare'];
 var DW_OUTPUT_BANDS = ['water', 'trees', 'grass', 'flooded_veg', 'crops', 'shrub_scrub', 'built', 'bareland'];
 
@@ -307,18 +239,23 @@ function buildVegetationMask(year, region) {
   return label.gte(1).and(label.lte(5));
 }
 
+// -------------------------------------------------------------
 // 7. STACK FITUR DAN INFERENSI MODEL
+// -------------------------------------------------------------
 function buildFeatureStack(s2, s1, dem, dw, region) {
   return s2.addBands(s1).addBands(dem).addBands(dw).clip(region).select(CFG.features);
 }
 
 function runInference(featureStack, vegMask, region) {
-  var vegStack = featureStack.updateMask(vegMask);
-  var vegPrediction = vegStack.classify(rfModel).max(0);
-  return vegPrediction.unmask(0).clip(region).rename('agbd_predicted');
+  var stack = (CFG.maskNonVegetation && vegMask) ? featureStack.updateMask(vegMask) : featureStack;
+  var prediction = stack.classify(rfModel).max(0);
+  var finalPrediction = (CFG.maskNonVegetation && vegMask) ? prediction.unmask(0) : prediction;
+  return finalPrediction.clip(region).rename('agbd_predicted');
 }
 
+// -------------------------------------------------------------
 // 8. VISUALISASI DAN EKSPOR
+// -------------------------------------------------------------
 function visualizeResults(prediction, region, year) {
   var agbdViz = {
     min: 0,
@@ -379,13 +316,16 @@ function exportPrediction(prediction, region, year) {
   print('   -> Task Ekspor Terdaftar: ' + fileName);
 }
 
+// -------------------------------------------------------------
 // 9. PIPELINE UTAMA (MULTI-YEAR INFERENCE)
+// -------------------------------------------------------------
 (function main() {
   print('2. Inisialisasi Inferensi AGBD Multi-Tahun (2021-2025)...');
   print('   - Total Fitur Input:', CFG.features.length);
   print('   - Orbit Sentinel-1 :', CFG.s1Orbit);
   print('   - CRS / Skala      :', CFG.crs, '/', CFG.scale, 'm');
   print('   - Tahun Pemrosesan :', CFG.years);
+  print('   - Mask Non-Vegetasi:', CFG.maskNonVegetation ? 'Aktif' : 'Nonaktif');
 
   var dem = buildDEMBands(aoi);
 
@@ -395,7 +335,7 @@ function exportPrediction(prediction, region, year) {
     var s2 = buildS2Composite(year, aoi);
     var s1 = buildS1Composite(year, aoi);
     var dw = buildDWComposite(year, aoi);
-    var vegMask = buildVegetationMask(year, aoi);
+    var vegMask = CFG.maskNonVegetation ? buildVegetationMask(year, aoi) : null;
 
     var stack = buildFeatureStack(s2, s1, dem, dw, aoi);
     var prediction = runInference(stack, vegMask, aoi);

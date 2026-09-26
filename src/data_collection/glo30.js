@@ -1,13 +1,22 @@
-// =============================================================
-// KONFIGURASI DAN KONSTANTA
-// =============================================================
+// -------------------------------------------------------------
+// KONFIGURASI
+// -------------------------------------------------------------
 var SCALE = 30;
-var PROJECTION = 'EPSG:32648';
 var EXPORT_PATH = 'users/sananta/';
 
-// =============================================================
-// PEMULIHAN GEOMETRI SPASIAL (JIKA INPUT DARI CSV / ASSET)
-// =============================================================
+var DW_INPUT_BANDS = [
+  'water', 'trees', 'grass', 'flooded_vegetation',
+  'crops', 'shrub_and_scrub', 'built', 'bare'
+];
+
+var DW_OUTPUT_BANDS = [
+  'water', 'trees', 'grass', 'flooded_veg',
+  'crops', 'shrub_scrub', 'built', 'bareland'
+];
+
+// -------------------------------------------------------------
+// GEOMETRI SPASIAL
+// -------------------------------------------------------------
 var rawTable = typeof table !== 'undefined' ? table : ee.FeatureCollection([]);
 
 var agbdTable = rawTable.map(function (f) {
@@ -24,49 +33,102 @@ var agbdTable = rawTable.map(function (f) {
 
 var overallRegion = agbdTable.geometry().bounds();
 
-print('1. Jumlah Titik Input (agbdTable):', agbdTable.size());
+var uniqueQuarters = ee.List(
+  agbdTable.aggregate_array('year_quarter')
+).distinct().sort();
 
-// =============================================================
-// TAHAP 1: PREPROCESSING COPERNICUS GLO-30 DEM
-// =============================================================
-var collection = ee.ImageCollection('COPERNICUS/DEM/GLO30')
-  .filterBounds(overallRegion);
+// Diagnostik Awal
+print('1. Jumlah Titik Input DW (agbdTable):', agbdTable.size());
+print('2. Daftar Kuartal pada Titik Target:', uniqueQuarters);
 
-var nativeProj = collection.first().projection();
+// -------------------------------------------------------------
+// PERHITUNGAN RENTANG WAKTU KUARTAL
+// -------------------------------------------------------------
+function getQuarterInterval(yqStr) {
+  var str = ee.String(yqStr);
+  var parts = str.split('_');
+  var yearNum = ee.Number.parse(parts.get(0));
+  var qStr = ee.String(parts.get(1));
 
-var dem = collection
-  .select('DEM')
-  .mosaic()
-  .setDefaultProjection(nativeProj)
-  .rename('dem');
+  var startMonth = ee.Number(
+    ee.Algorithms.If(
+      qStr.equals('Q1'), 1,
+      ee.Algorithms.If(
+        qStr.equals('Q2'), 4,
+        ee.Algorithms.If(
+          qStr.equals('Q3'), 7, 10
+        )
+      )
+    )
+  );
 
-var terrain = ee.Terrain.products(
-  dem.reproject({ crs: PROJECTION, scale: SCALE })
-);
+  var startDate = ee.Date.fromYMD(yearNum, startMonth, 1);
+  var endDate = startDate.advance(3, 'month');
 
-var demBands = dem
-  .addBands(terrain.select('slope').rename('slope'))
-  .addBands(terrain.select('aspect').rename('aspect'))
-  .resample('bilinear');
+  return { start: startDate, end: endDate };
+}
 
-// =============================================================
-// TAHAP 2: EKSTRAKSI FITUR TOPOGRAFI
-// =============================================================
-var finalDataset = demBands.sampleRegions({
-  collection: agbdTable,
-  scale: SCALE,
-  geometries: true,
-  tileScale: 4
-}).filter(ee.Filter.notNull(['dem', 'slope', 'aspect']));
+// -------------------------------------------------------------
+// PREPROCESSING KOLEKSI DYNAMIC WORLD V1
+// -------------------------------------------------------------
+var dwCollection = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(overallRegion)
+  .select(DW_INPUT_BANDS);
 
-print('2. Jumlah Titik Output DEM (finalDataset):', finalDataset.size());
-print('3. Contoh Data Pertama DEM:', finalDataset.first());
+print('3. Total Citra Dynamic World Terfilter:', dwCollection.size());
 
-// =============================================================
-// TAHAP 3: EKSPOR DATASET GEDI + S2 + S1 + DEM
-// =============================================================
+// Fallback overall jika ada kuartal yang kosong
+var dwOverall = dwCollection.mean().resample('bilinear')
+  .select(DW_INPUT_BANDS, DW_OUTPUT_BANDS);
+
+// -------------------------------------------------------------
+// EKSTRAKSI FITUR KUARTALAN DYNAMIC WORLD
+// -------------------------------------------------------------
+var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
+  yqStr = ee.String(yqStr);
+
+  var quarterPoints = agbdTable.filter(
+    ee.Filter.eq('year_quarter', yqStr)
+  );
+
+  var interval = getQuarterInterval(yqStr);
+
+  var compositeQuarter = dwCollection
+    .filterDate(interval.start, interval.end)
+    .mean()
+    .resample('bilinear')
+    .select(DW_INPUT_BANDS, DW_OUTPUT_BANDS);
+
+  // Fallback ke dwOverall jika kuartal kosong
+  var composite = compositeQuarter.unmask(dwOverall);
+
+  return composite.sampleRegions({
+    collection: quarterPoints,
+    scale: SCALE,
+    geometries: true,
+    tileScale: 4
+  }).filter(ee.Filter.notNull(['trees']));
+});
+
+var finalDataset = ee.FeatureCollection(quarterlyCollections).flatten();
+
+// Diagnostik Akhir
+print('4. Jumlah Titik Final Master Dataset:', finalDataset.size());
+print('5. Contoh Data Pertama Master Dataset:', finalDataset.first());
+
+// -------------------------------------------------------------
+// EKSPOR DATASET FINAL MULTIMODAL LENGKAP
+// -------------------------------------------------------------
 Export.table.toAsset({
   collection: finalDataset,
-  description: 'GEDI_S2_S1_DEM_Combined_Dataset',
-  assetId: EXPORT_PATH + 'gedi_s2_s1_dem_combined'
+  description: 'GEDI_S2_S1_DEM_DW_Master_Dataset',
+  assetId: EXPORT_PATH + 'gedi_master_multimodal_dataset'
+});
+
+Export.table.toDrive({
+  collection: finalDataset,
+  description: 'GEDI_S2_S1_DEM_DW_Master_Dataset',
+  folder: 'Tugas Akhir',
+  fileNamePrefix: 'gedi_master_multimodal_dataset',
+  fileFormat: 'CSV'
 });

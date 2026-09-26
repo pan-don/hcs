@@ -1,5 +1,5 @@
 // ------------------------------------------------------------------------------
-// 1. KONFIGURASI DAN PARAMETER
+// KONFIGURASI
 // ------------------------------------------------------------------------------
 var SCALE = 30;
 var PROJECTION = 'EPSG:32648';
@@ -8,13 +8,16 @@ var END_DATE = ee.Date('2025-07-01');
 var EXPORT_PATH = 'users/sananta/';
 var OUTPUT_PROPS = ['agbd', 'agbd_se', 'rh98', 'longitude', 'latitude', 'year_quarter', 'hex_id'];
 var proj = ee.Projection(PROJECTION);
+
 var MAX_SAMPLES_PER_HEX = 100;
 var RANDOM_SEED = 42;
+var MIN_SENSITIVITY = 0.90;
+var MASK_NON_VEGETATION = false;
 var INCLUDE_BARE_SAMPLES = false;
 var MAX_BARE_POINTS_PER_HEX = 10;
 
 // ------------------------------------------------------------------------------
-// 2. FUNGSI HELPER
+// FUNGSI HELPER
 // ------------------------------------------------------------------------------
 function getQuarterInterval(yqStr) {
   var parts = ee.String(yqStr).split('_');
@@ -34,11 +37,9 @@ function limitSamplesPerGrid(collection, maxPerGrid, seed) {
     return collection;
   }
 
-  // Tambahkan kolom acak untuk pengacakan sampling
   var withRandom = collection.randomColumn('rand_sample', seed);
   var uniqueHex = withRandom.distinct(['hex_id']);
 
-  // Kelompokkan sampel per hex_id dan urutkan berdasarkan nilai acak
   var join = ee.Join.saveAll({
     matchesKey: 'samples',
     ordering: 'rand_sample',
@@ -56,7 +57,6 @@ function limitSamplesPerGrid(collection, maxPerGrid, seed) {
     condition: filter
   });
 
-  // Potong list sampel maksimal sebanyak maxPerGrid per hex_id
   var limited = joined.map(function (feat) {
     var samplesList = ee.List(feat.get('samples'));
     var sliced = samplesList.slice(0, maxPerGrid);
@@ -67,12 +67,26 @@ function limitSamplesPerGrid(collection, maxPerGrid, seed) {
 }
 
 // ------------------------------------------------------------------------------
-// 3. INPUT AOI DAN STANDARISASI HEXAGON GRID
+// INPUT AOI DAN STANDARISASI HEXAGON GRID
 // ------------------------------------------------------------------------------
-var aoiGeom = typeof aoi !== 'undefined' ? aoi.geometry() : geometry.geometry();
-var hexGridInput = typeof hexgrid !== 'undefined' ? hexgrid : aoi;
+var aoiGeom;
+if (typeof aoi !== 'undefined') {
+  aoiGeom = aoi.geometry();
+} else if (typeof geometry !== 'undefined') {
+  aoiGeom = (typeof geometry.geometry === 'function') ? geometry.geometry() : geometry;
+} else {
+  aoiGeom = Map.getBounds(true);
+}
 
-// Bersihkan dan standarisasi properti hex_id pada setiap hexagon
+var hexGridInput;
+if (typeof hexgrid !== 'undefined') {
+  hexGridInput = hexgrid;
+} else if (typeof aoi !== 'undefined') {
+  hexGridInput = aoi;
+} else {
+  hexGridInput = ee.FeatureCollection([ee.Feature(aoiGeom, { hex_id: 'HEX_0' })]);
+}
+
 var hexGridClean = hexGridInput.map(function (cell) {
   var hexKey = ee.Algorithms.If(
     cell.get('hex_id'), cell.get('hex_id'),
@@ -85,7 +99,7 @@ var hexGridClean = hexGridInput.map(function (cell) {
 var lonLat = ee.Image.pixelLonLat();
 
 // ------------------------------------------------------------------------------
-// 4. FILTER KUALITAS GEDI L4A (AGBD) & L2A (RH98)
+// FILTER KUALITAS GEDI L4A (AGBD) & L2A (RH98)
 // ------------------------------------------------------------------------------
 // GEDI L4A: AGBD dan agbd_se
 var gediL4aMasked = ee.ImageCollection('LARSE/GEDI/GEDI04_A_002_MONTHLY')
@@ -101,7 +115,7 @@ var gediL4aMasked = ee.ImageCollection('LARSE/GEDI/GEDI04_A_002_MONTHLY')
     var qualityMask = img.select('l4_quality_flag').eq(1)
       .and(img.select('degrade_flag').eq(0))
       .and(img.select('l2_quality_flag').eq(1))
-      .and(img.select('sensitivity').gte(0.90))
+      .and(img.select('sensitivity').gte(MIN_SENSITIVITY))
       .and(agbd.gt(0));
 
     return img.updateMask(qualityMask)
@@ -121,7 +135,7 @@ var gediL2aMasked = ee.ImageCollection('LARSE/GEDI/GEDI02_A_002_MONTHLY')
     var rh98 = img.select('rh98');
     var qualityMask = img.select('quality_flag').eq(1)
       .and(img.select('degrade_flag').eq(0))
-      .and(img.select('sensitivity').gte(0.90))
+      .and(img.select('sensitivity').gte(MIN_SENSITIVITY))
       .and(rh98.gt(0));
 
     return img.updateMask(qualityMask)
@@ -132,19 +146,15 @@ var gediL2aMasked = ee.ImageCollection('LARSE/GEDI/GEDI02_A_002_MONTHLY')
 var overallL2a = gediL2aMasked.median().select('rh98');
 
 // ------------------------------------------------------------------------------
-// 5. DATASET TUTUPAN LAHAN: DYNAMIC WORLD V1
+// DATASET TUTUPAN LAHAN: DYNAMIC WORLD V1
 // ------------------------------------------------------------------------------
-// Dynamic World Label:
-// 0: water, 1: trees, 2: grass, 3: flooded_veg, 4: crops, 5: shrub_and_scrub,
-// 6: built, 7: bare, 8: snow_and_ice
 var dwCollection = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
   .filterBounds(aoiGeom);
 
 var overallDW = dwCollection
   .filterDate(START_DATE, END_DATE)
   .select('label')
-  .mode()
-  .reproject({ crs: proj, scale: SCALE });
+  .mode();
 
 var overallVegMask = overallDW.gte(1).and(overallDW.lte(5));
 var overallBareMask = overallDW.eq(7);
@@ -157,9 +167,9 @@ var uniqueQuarters = ee.List(
 print('Daftar Kuartal Aktif GEDI:', uniqueQuarters);
 
 // ------------------------------------------------------------------------------
-// 6. EKSTRAKSI GEDI VALID PER HEXAGON DAN FILTER TUTUPAN VEGETASI
+// EKSTRAKSI GEDI VALID PER HEXAGON DAN FILTER TUTUPAN LAHAN
 // ------------------------------------------------------------------------------
-var vegSamples = ee.FeatureCollection(uniqueQuarters.map(function (yq) {
+var extractedQuarterlySamples = ee.FeatureCollection(uniqueQuarters.map(function (yq) {
   yq = ee.String(yq);
   var interval = getQuarterInterval(yq);
 
@@ -169,7 +179,6 @@ var vegSamples = ee.FeatureCollection(uniqueQuarters.map(function (yq) {
     .select('rh98')
     .unmask(overallL2a);
 
-  // Mosaik Dynamic World kuartalan (fallback ke overallDW jika kuartal berawan/kosong)
   var dwQ = dwCollection
     .filterDate(interval.start, interval.end)
     .select('label')
@@ -177,19 +186,21 @@ var vegSamples = ee.FeatureCollection(uniqueQuarters.map(function (yq) {
     .unmask(overallDW)
     .rename('dw_label');
 
-  // Gabungkan seluruh band ke dalam 1 citra
   var quarterImg = l4aQ.select(['agbd', 'agbd_se'])
     .addBands(l2aQ.select('rh98'))
     .addBands(dwQ.select('dw_label'))
     .addBands(lonLat.select(['longitude', 'latitude']));
 
-  // Pastikan citra hanya memiliki nilai pada piksel GEDI yang valid
   var validGediMask = l4aQ.select('agbd').mask().and(l2aQ.select('rh98').mask());
-  var maskedQuarterImg = quarterImg.updateMask(validGediMask);
 
-  // LANGKAH 1: Ekstraksi seluruh piksel GEDI valid yang berada di dalam setiap hexagon
-  // sampleRegions pada polygon hanya mengambil piksel unmasked (shot GEDI nyata)
-  // dan secara otomatis mewarisi properti 'hex_id' dari hexagon terkait.
+  var samplingMask = validGediMask;
+  if (MASK_NON_VEGETATION) {
+    var vegMask = dwQ.gte(1).and(dwQ.lte(5));
+    samplingMask = samplingMask.and(vegMask);
+  }
+
+  var maskedQuarterImg = quarterImg.updateMask(samplingMask);
+
   var hexQuarterSamples = maskedQuarterImg.sampleRegions({
     collection: hexGridClean,
     properties: ['hex_id'],
@@ -199,31 +210,36 @@ var vegSamples = ee.FeatureCollection(uniqueQuarters.map(function (yq) {
     tileScale: 4
   });
 
-  // LANGKAH 2: Filter titik-titik valid GEDI tersebut untuk tutupan vegetasi
-  // (Dynamic World classes 1..5: trees, grass, flooded_vegetation, crops, shrub_and_scrub)
-  var vegQuarterSamples = hexQuarterSamples.filter(
-    ee.Filter.and(
-      ee.Filter.gte('dw_label', 1),
-      ee.Filter.lte('dw_label', 5),
-      ee.Filter.gt('agbd', 0),
-      ee.Filter.notNull(['rh98'])
-    )
-  ).map(function (f) {
-    return f.set('year_quarter', yq).select(OUTPUT_PROPS);
-  });
+  var baseQualityFilter = ee.Filter.and(
+    ee.Filter.gt('agbd', 0),
+    ee.Filter.notNull(['rh98'])
+  );
 
-  return vegQuarterSamples;
+  var targetFilter = MASK_NON_VEGETATION
+    ? ee.Filter.and(
+      baseQualityFilter,
+      ee.Filter.gte('dw_label', 1),
+      ee.Filter.lte('dw_label', 5)
+    )
+    : baseQualityFilter;
+
+  var quarterSamplesFiltered = hexQuarterSamples.filter(targetFilter)
+    .map(function (f) {
+      return f.set('year_quarter', yq).select(OUTPUT_PROPS);
+    });
+
+  var quarterSamples = (MAX_SAMPLES_PER_HEX && MAX_SAMPLES_PER_HEX > 0)
+    ? limitSamplesPerGrid(quarterSamplesFiltered, MAX_SAMPLES_PER_HEX, RANDOM_SEED)
+      .select(OUTPUT_PROPS)
+    : quarterSamplesFiltered;
+
+  return quarterSamples;
 })).flatten();
 
-// LANGKAH 3: Batasi jumlah sampel maksimum per hexagon untuk mencegah spatial bias
-var rawVegSamples = vegSamples;
-if (MAX_SAMPLES_PER_HEX && MAX_SAMPLES_PER_HEX > 0) {
-  vegSamples = limitSamplesPerGrid(vegSamples, MAX_SAMPLES_PER_HEX, RANDOM_SEED)
-    .select(OUTPUT_PROPS);
-}
+var gediProcessedSamples = extractedQuarterlySamples;
 
 // ------------------------------------------------------------------------------
-// 7. (OPSIONAL) SAMPEL PSEUDO-ABSENCE BARELAND DENGAN KONTROL PROPORSI
+// SAMPEL PSEUDO-ABSENCE BARELAND DENGAN KONTROL PROPORSI
 // ------------------------------------------------------------------------------
 var gediSamples;
 
@@ -256,23 +272,70 @@ if (INCLUDE_BARE_SAMPLES) {
     });
   })).flatten();
 
-  gediSamples = vegSamples.merge(bareSamples);
+  gediSamples = gediProcessedSamples.merge(bareSamples);
   print('Status Bareland Pseudo-Absence: Diaktifkan');
 } else {
-  gediSamples = vegSamples;
-  print('Status Bareland Pseudo-Absence: Dinonaktifkan (Hanya Sampel Vegetasi Asli GEDI)');
+  gediSamples = gediProcessedSamples;
+  print('Status Bareland Pseudo-Absence: Dinonaktifkan (Hanya Sampel GEDI Asli)');
 }
 
 // ------------------------------------------------------------------------------
-// 8. LOGGING & MONITORING HASIL DI CONSOLE
+// LOGGING & MONITORING HASIL DI CONSOLE
 // ------------------------------------------------------------------------------
-print('Batas Maksimal Sampel per Hexagon (MAX_SAMPLES_PER_HEX):', MAX_SAMPLES_PER_HEX ? MAX_SAMPLES_PER_HEX : 'Tanpa Batas');
-print('Jumlah Total Sampel GEDI Vegetasi (Sebelum Pembatasan):', rawVegSamples.size());
-print('Jumlah Total Sampel GEDI Vegetasi (Setelah Pembatasan):', vegSamples.size());
-print('Contoh 5 Titik Sampel Pertama:', gediSamples.limit(5));
+print('================== KONFIGURASI DATA COLLECTION GEDI ==================');
+print('1. Opsi Masking Non-Vegetasi (MASK_NON_VEGETATION):', MASK_NON_VEGETATION ? 'AKTIF (Hanya Tutupan Vegetasi DW 1-5)' : 'NONAKTIF (Semua Tutupan Lahan)');
+print('2. Ambang Batas Sensitivitas GEDI (MIN_SENSITIVITY):', MIN_SENSITIVITY);
+print('3. Unit Pembatasan Sampel: (year_quarter, hex_id) — maks', MAX_SAMPLES_PER_HEX ? MAX_SAMPLES_PER_HEX : 'Tanpa Batas', 'per kombinasi');
+print('4. Jumlah Total Sampel GEDI (Setelah Pembatasan per Kuartal per Hexagon):', gediProcessedSamples.size());
+print('5. Jumlah Total Dataset Final (Termasuk Bareland jika aktif):', gediSamples.size());
+print('6. Contoh 5 Titik Sampel Pertama:', gediSamples.limit(5));
+print('======================================================================');
 
 // ------------------------------------------------------------------------------
-// 9. VISUALISASI PETA
+// VALIDASI: Verifikasi batas sampel per kombinasi (year_quarter, hex_id)
+// Hasil validasi hanya untuk print(), tidak dimasukkan ke dataset final.
+// ------------------------------------------------------------------------------
+var validationSamples = gediProcessedSamples.map(function (f) {
+  return ee.Feature(null, {
+    year_quarter: f.get('year_quarter'),
+    hex_id: f.get('hex_id'),
+    yq_hex_key: ee.String(f.get('year_quarter')).cat('|').cat(ee.String(f.get('hex_id')))
+  });
+});
+
+var uniqueYqHex = validationSamples.distinct(['yq_hex_key']);
+
+var joinValidation = ee.Join.saveAll({
+  matchesKey: 'matched_samples',
+  ordering: 'yq_hex_key',
+  ascending: true
+});
+
+var filterValidation = ee.Filter.equals({
+  leftField: 'yq_hex_key',
+  rightField: 'yq_hex_key'
+});
+
+var joinedValidation = joinValidation.apply({
+  primary: uniqueYqHex,
+  secondary: validationSamples,
+  condition: filterValidation
+});
+
+var validationResult = joinedValidation.map(function (feat) {
+  var count = ee.List(feat.get('matched_samples')).size();
+  return ee.Feature(null, {
+    year_quarter: feat.get('year_quarter'),
+    hex_id: feat.get('hex_id'),
+    sample_count: count
+  });
+});
+
+print('VALIDASI: Jumlah sampel per (year_quarter, hex_id) [harus <= ' + MAX_SAMPLES_PER_HEX + ']:', validationResult.limit(20));
+print('VALIDASI: Total kombinasi (year_quarter, hex_id) unik:', uniqueYqHex.size());
+
+// ------------------------------------------------------------------------------
+// VISUALISASI PETA
 // ------------------------------------------------------------------------------
 Map.centerObject(aoiGeom, 8);
 Map.addLayer(aoiGeom, { color: 'black' }, 'Batas AOI', false);
@@ -282,20 +345,30 @@ Map.addLayer(
 );
 Map.addLayer(overallVegMask.selfMask(), { palette: ['#2ca25f'] }, 'DW Masker Vegetasi', false);
 Map.addLayer(overallBareMask.selfMask(), { palette: ['#e6550d'] }, 'DW Masker Bare Land', false);
+
+var gediAgbdVis = gediL4aMasked.mosaic().select('agbd');
+var gediRh98Vis = overallL2a;
+
+if (MASK_NON_VEGETATION) {
+  gediAgbdVis = gediAgbdVis.updateMask(overallVegMask);
+  gediRh98Vis = gediRh98Vis.updateMask(overallVegMask);
+}
+
 Map.addLayer(
-  gediL4aMasked.mosaic().select('agbd').updateMask(overallVegMask),
+  gediAgbdVis,
   { min: 0, max: 300, palette: ['#f7fcb9', '#addd8e', '#31a354', '#006837'] },
-  'GEDI AGBD Mosaik (Vegetasi)'
+  'GEDI AGBD Mosaik ' + (MASK_NON_VEGETATION ? '(Hanya Vegetasi)' : '(Semua Tutupan)')
 );
 Map.addLayer(
-  overallL2a.updateMask(overallVegMask),
+  gediRh98Vis,
   { min: 0, max: 40, palette: ['#edf8b1', '#7fcdbb', '#2c7fb8'] },
-  'GEDI RH98 Kanopi', false
+  'GEDI RH98 Kanopi ' + (MASK_NON_VEGETATION ? '(Hanya Vegetasi)' : '(Semua Tutupan)'),
+  false
 );
 Map.addLayer(gediSamples.limit(1000), { color: 'blue' }, 'Titik Sampel GEDI Final', true);
 
 // ------------------------------------------------------------------------------
-// 10. EKSPOR DATASET KE ASSET & GOOGLE DRIVE
+// EKSPOR DATASET KE ASSET & GOOGLE DRIVE
 // ------------------------------------------------------------------------------
 // Ekspor ke Earth Engine Asset
 Export.table.toAsset({

@@ -1,7 +1,6 @@
-
-// =============================================================
+// -------------------------------------------------------------
 // KONFIGURASI DAN PARAMETER MODEL
-// =============================================================
+// -------------------------------------------------------------
 var ASSET_ID = 'users/sananta/gedi_master_multimodal_dataset';
 var TARGET = 'rh98';
 var SPLIT_SEED = 42;
@@ -19,21 +18,19 @@ var RF_PARAMS = {
 };
 
 var FEATURES = [
-    's2_b2', 's2_b3', 's2_b4', 's2_b5', 's2_b6', 's2_b7', 's2_b8', 's2_b11', 's2_b12',
-    'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
-    'ireci_contrast', 'ireci_ent', 'ireci_corr',
-    'swir_contrast', 'swir_ent', 'swir_corr',
-    's1_vv', 's1_vh',
-    's1_vv_contrast', 's1_vv_ent', 's1_vv_corr',
-    's1_vh_contrast', 's1_vh_ent', 's1_vh_corr',
+    'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b11', 'b12',
+    'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi',
+    'vv', 'vh',
+    'vv_cont', 'vv_ent', 'vv_corr',
+    'vh_cont', 'vh_ent', 'vh_corr',
     'dem', 'slope', 'aspect',
     'water', 'trees', 'grass', 'flooded_veg',
     'crops', 'shrub_scrub', 'built', 'bareland'
 ];
 
-// =============================================================
+// -------------------------------------------------------------
 // 1. LOAD DATASET & STANDARISASI NAMA PROPERTI
-// =============================================================
+// -------------------------------------------------------------
 var rawDataset = typeof table !== 'undefined' ? table : ee.FeatureCollection(ASSET_ID);
 
 print('1. Diagnostik Dataset Awal:');
@@ -41,17 +38,31 @@ print('   - Total Sampel Mentah Awal:', rawDataset.size());
 print('   - Contoh 1 Data Mentah    :', rawDataset.first());
 
 // Standarisasi properti dataset agar sinkron dengan daftar FEATURES
-// Menjembatani perbedaan nama band seperti s1_vv vs vv, RH98 vs rh98, dsb.
 var standardizedDataset = rawDataset.map(function (f) {
     var d = f.toDictionary();
 
-    // S1 SAR Bands: salin dari s1_vv jika vv tidak ada
+    // Sentinel-2 Bands
+    var b2 = ee.Algorithms.If(d.contains('b2'), d.get('b2'), d.get('s2_b2'));
+    var b3 = ee.Algorithms.If(d.contains('b3'), d.get('b3'), d.get('s2_b3'));
+    var b4 = ee.Algorithms.If(d.contains('b4'), d.get('b4'), d.get('s2_b4'));
+    var b5 = ee.Algorithms.If(d.contains('b5'), d.get('b5'), d.get('s2_b5'));
+    var b6 = ee.Algorithms.If(d.contains('b6'), d.get('b6'), d.get('s2_b6'));
+    var b7 = ee.Algorithms.If(d.contains('b7'), d.get('b7'), d.get('s2_b7'));
+    var b8 = ee.Algorithms.If(d.contains('b8'), d.get('b8'), d.get('s2_b8'));
+    var b11 = ee.Algorithms.If(d.contains('b11'), d.get('b11'), d.get('s2_b11'));
+    var b12 = ee.Algorithms.If(d.contains('b12'), d.get('b12'), d.get('s2_b12'));
+
+    // S1 SAR Bands
     var vv = ee.Algorithms.If(d.contains('vv'), d.get('vv'), d.get('s1_vv'));
     var vh = ee.Algorithms.If(d.contains('vh'), d.get('vh'), d.get('s1_vh'));
-    var vv_contrast = ee.Algorithms.If(d.contains('vv_contrast'), d.get('vv_contrast'), d.get('s1_vv_contrast'));
+    var vv_cont = ee.Algorithms.If(d.contains('vv_cont'), d.get('vv_cont'),
+        ee.Algorithms.If(d.contains('vv_contrast'), d.get('vv_contrast'),
+        ee.Algorithms.If(d.contains('s1_vv_cont'), d.get('s1_vv_cont'), d.get('s1_vv_contrast'))));
     var vv_ent = ee.Algorithms.If(d.contains('vv_ent'), d.get('vv_ent'), d.get('s1_vv_ent'));
     var vv_corr = ee.Algorithms.If(d.contains('vv_corr'), d.get('vv_corr'), d.get('s1_vv_corr'));
-    var vh_contrast = ee.Algorithms.If(d.contains('vh_contrast'), d.get('vh_contrast'), d.get('s1_vh_contrast'));
+    var vh_cont = ee.Algorithms.If(d.contains('vh_cont'), d.get('vh_cont'),
+        ee.Algorithms.If(d.contains('vh_contrast'), d.get('vh_contrast'),
+        ee.Algorithms.If(d.contains('s1_vh_cont'), d.get('s1_vh_cont'), d.get('s1_vh_contrast'))));
     var vh_ent = ee.Algorithms.If(d.contains('vh_ent'), d.get('vh_ent'), d.get('s1_vh_ent'));
     var vh_corr = ee.Algorithms.If(d.contains('vh_corr'), d.get('vh_corr'), d.get('s1_vh_corr'));
 
@@ -77,12 +88,13 @@ var standardizedDataset = rawDataset.map(function (f) {
     var bareland = ee.Algorithms.If(d.contains('bareland'), d.get('bareland'), d.get('bare'));
 
     return f.set({
+        'b2': b2, 'b3': b3, 'b4': b4, 'b5': b5, 'b6': b6, 'b7': b7, 'b8': b8, 'b11': b11, 'b12': b12,
         'vv': vv,
         'vh': vh,
-        'vv_contrast': vv_contrast,
+        'vv_cont': vv_cont,
         'vv_ent': vv_ent,
         'vv_corr': vv_corr,
-        'vh_contrast': vh_contrast,
+        'vh_cont': vh_cont,
         'vh_ent': vh_ent,
         'vh_corr': vh_corr,
         'rh98': rh98,
@@ -96,9 +108,9 @@ var standardizedDataset = rawDataset.map(function (f) {
     });
 });
 
-// =============================================================
+// -------------------------------------------------------------
 // 2. FILTER KUALITAS & PEMBERSIHAN DATASET
-// =============================================================
+// -------------------------------------------------------------
 // Filter target valid
 var targetFiltered = standardizedDataset
     .filter(ee.Filter.notNull([TARGET]))
@@ -124,9 +136,9 @@ print('   - Sampel Lolos Filter Slope <= ' + MAX_SLOPE_DEG + '°    :', slopeFil
 print('   - Total Sampel Bersih Siap Training   :', cleanDataset.size());
 print('   - Total Fitur Prediktor Digunakan     :', FEATURES.length);
 
-// =============================================================
+// -------------------------------------------------------------
 // 3. SPATIAL SPLIT (BEBAS DATA LEAKAGE) DENGAN FALLBACK AMAN
-// =============================================================
+// -------------------------------------------------------------
 var trainSet;
 var testSet;
 
@@ -162,9 +174,9 @@ if (SPLIT_METHOD === 'SPATIAL') {
 print('   - Jumlah Sampel Training:', trainSet.size());
 print('   - Jumlah Sampel Testing :', testSet.size());
 
-// =============================================================
+// -------------------------------------------------------------
 // 4. PELATIHAN MODEL RANDOM FOREST
-// =============================================================
+// -------------------------------------------------------------
 var rfModel = ee.Classifier.smileRandomForest({
     numberOfTrees: RF_PARAMS.numberOfTrees,
     variablesPerSplit: RF_PARAMS.variablesPerSplit,
@@ -181,15 +193,15 @@ var rfModel = ee.Classifier.smileRandomForest({
 
 print('4. Model Berhasil Dilatih: Random Forest Regressor (Canopy Height RH98)');
 
-// =============================================================
+// -------------------------------------------------------------
 // 5. PREDIKSI TRAINING DAN TESTING
-// =============================================================
+// -------------------------------------------------------------
 var trainPred = trainSet.classify(rfModel, 'predicted');
 var testPred = testSet.classify(rfModel, 'predicted');
 
-// =============================================================
+// -------------------------------------------------------------
 // 6. FUNGSI: PERHITUNGAN METRIK EVALUASI
-// =============================================================
+// -------------------------------------------------------------
 function computeMetrics(fc, actualCol, predCol) {
     var n = fc.size();
     var meanActual = fc.aggregate_mean(actualCol);
@@ -232,9 +244,9 @@ function computeMetrics(fc, actualCol, predCol) {
     };
 }
 
-// =============================================================
+// -------------------------------------------------------------
 // 7. EVALUASI DAN MONITORING HASIL
-// =============================================================
+// -------------------------------------------------------------
 var trainMetrics = computeMetrics(trainPred, TARGET, 'predicted');
 var testMetrics = computeMetrics(testPred, TARGET, 'predicted');
 
@@ -255,9 +267,9 @@ print('      Bias :', testMetrics.bias, 'm');
 print('      %Bias:', testMetrics.pBias, '%');
 print('      rRMSE:', testMetrics.rRMSE, '%');
 
-// =============================================================
+// -------------------------------------------------------------
 // 8. VISUALISASI GRAFIK SCATTER AKTUAL VS PREDIKSI
-// =============================================================
+// -------------------------------------------------------------
 // Ambil sampel representatif (maks 2500 titik) untuk rendering grafik di UI tanpa lag
 var scatterSample = testPred.limit(2500);
 
@@ -289,9 +301,9 @@ var scatterChart = ui.Chart.feature.byFeature({
 
 print(scatterChart);
 
-// =============================================================
+// -------------------------------------------------------------
 // 9. VISUALISASI GRAFIK FEATURE IMPORTANCE
-// =============================================================
+// -------------------------------------------------------------
 var importance = rfModel.explain();
 var importanceValues = ee.Dictionary(ee.Dictionary(importance).get('importance'));
 
@@ -311,11 +323,45 @@ var importanceChart = ui.Chart.feature.byProperty({
 
 print(importanceChart);
 
-// =============================================================
+// -------------------------------------------------------------
 // 10. EKSPOR MODEL RANDOM FOREST KE ASSET
-// =============================================================
+// -------------------------------------------------------------
 Export.classifier.toAsset({
     classifier: rfModel,
     description: 'Export_RF_Canopy_Height_Model',
     assetId: 'users/sananta/rf_canopy_height_model'
+});
+
+// -------------------------------------------------------------
+// 11. EKSPOR HASIL EVALUASI KE GOOGLE DRIVE
+// -------------------------------------------------------------
+var evalMetrics = ee.FeatureCollection([
+    ee.Feature(null, {
+        'split': 'training',
+        'target': TARGET,
+        'r2': trainMetrics.r2,
+        'rmse': trainMetrics.rmse,
+        'mae': trainMetrics.mae,
+        'bias': trainMetrics.bias,
+        'pbias': trainMetrics.pBias,
+        'rrmse': trainMetrics.rRMSE
+    }),
+    ee.Feature(null, {
+        'split': 'testing',
+        'target': TARGET,
+        'r2': testMetrics.r2,
+        'rmse': testMetrics.rmse,
+        'mae': testMetrics.mae,
+        'bias': testMetrics.bias,
+        'pbias': testMetrics.pBias,
+        'rrmse': testMetrics.rRMSE
+    })
+]);
+
+Export.table.toDrive({
+    collection: evalMetrics,
+    description: 'Export_Evaluation_Metrics_Canopy_Height',
+    folder: 'GEE_Exports',
+    fileNamePrefix: 'canopy_height_model_evaluation_metrics',
+    fileFormat: 'CSV'
 });

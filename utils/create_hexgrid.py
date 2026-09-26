@@ -1,6 +1,6 @@
-# ==========================================================
+# ----------------------------------------------------------
 # IMPORT LIBRARY
-# ==========================================================
+# ----------------------------------------------------------
 import os
 import shutil
 import time
@@ -10,9 +10,9 @@ from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 import zipfile
 
-# ==========================================================
-# FUNGSI: BUAT SATU HEXAGON DARI TITIK PUSAT
-# ==========================================================
+# ----------------------------------------------------------
+# Membuat Satu Hexagon Dari Titik Pusat
+# ----------------------------------------------------------
 def create_hexagon(center_x, center_y, radius):
     angles = np.deg2rad(np.arange(30, 390, 60))
     x = center_x + radius * np.cos(angles)
@@ -20,9 +20,9 @@ def create_hexagon(center_x, center_y, radius):
     return Polygon(zip(x, y))
 
 
-# ==========================================================
-# FUNGSI: GENERATE HEXAGONAL GRID DALAM BOUNDING BOX
-# ==========================================================
+# ----------------------------------------------------------
+# Generate Hexagonal Grid Dalam Bounding Box
+# ----------------------------------------------------------
 def generate_hex_grid(bounds, diameter):
     radius = diameter / 2
     width = radius * np.sqrt(3)
@@ -48,9 +48,9 @@ def generate_hex_grid(bounds, diameter):
     )
 
 
-# ==========================================================
-# FUNGSI: CLIP GRID KE BATAS ADMINISTRASI (SPATIAL INDEX)
-# ==========================================================
+# ----------------------------------------------------------
+# Clip Grid Ke Batas Administrasi (Spatial Index)
+# ----------------------------------------------------------
 def clip_grid_to_boundary(hex_grid, boundary_gdf, crs):
     hex_grid = hex_grid.set_crs(crs)
     boundary_proj = boundary_gdf.to_crs(crs)
@@ -61,9 +61,9 @@ def clip_grid_to_boundary(hex_grid, boundary_gdf, crs):
     return clipped
 
 
-# ==========================================================
-# FUNGSI: SIMPAN SHAPEFILE + ZIP UNTUK UPLOAD GEE
-# ==========================================================
+# ----------------------------------------------------------
+# Simpan Shapefile + ZIP Untuk Upload GEE
+# ----------------------------------------------------------
 def save_as_shapefile_for_gee(gdf, output_dir, layer_name):
     os.makedirs(output_dir, exist_ok=True)
     shp_path = os.path.join(output_dir, f"{layer_name}.shp")
@@ -78,9 +78,9 @@ def save_as_shapefile_for_gee(gdf, output_dir, layer_name):
     return shp_path, zip_path
 
 
-# ==========================================================
-# FUNGSI: PIPELINE UTAMA
-# ==========================================================
+# ----------------------------------------------------------
+# Pipeline Utama
+# ----------------------------------------------------------
 def build_hex_grid_for_riau(shapefile_path, diameter, crs, output_dir, layer_name):
     boundary = gpd.read_file(shapefile_path, engine="pyogrio")
     boundary_proj = boundary.to_crs(crs)
@@ -96,9 +96,9 @@ def build_hex_grid_for_riau(shapefile_path, diameter, crs, output_dir, layer_nam
     return clipped_grid, shp_path, zip_path
 
 
-# ==========================================================
-# FUNGSI: PLOT OVERLAY HEXAGONAL GRID DI ATAS BATAS RIAU
-# ==========================================================
+# ----------------------------------------------------------
+# Plot Overlay Hexagonal Grid Di Atas Batas Riau
+# ----------------------------------------------------------
 def plot_hex_grid_overlay(hex_grid, boundary_gdf, output_image=None):
     boundary_wgs = boundary_gdf.to_crs(epsg=4326)
 
@@ -117,9 +117,9 @@ def plot_hex_grid_overlay(hex_grid, boundary_gdf, output_image=None):
     plt.show()
 
 
-# ==========================================================
-# EKSEKUSI
-# ==========================================================
+# ----------------------------------------------------------
+# Eksekusi
+# ----------------------------------------------------------
 if __name__ == "__main__":
     SHAPEFILE_PATH = "data/shp/bogor_administrasi_kabkota.shp"
     HEX_DIAMETER = 1000

@@ -1,14 +1,15 @@
-// =============================================================
-// KONFIGURASI DAN KONSTANTA
-// =============================================================
+// -------------------------------------------------------------
+// KONFIGURASI
+// -------------------------------------------------------------
 var SCALE = 30;
+var PROJECTION = 'EPSG:32648';
 var GLCM_SIZE = 5;
 var S1_ORBIT = 'DESCENDING';
 var EXPORT_PATH = 'users/sananta/';
 
-// =============================================================
+// -------------------------------------------------------------
 // PEMULIHAN GEOMETRI SPASIAL & BOUNDING BOX
-// =============================================================
+// -------------------------------------------------------------
 var rawTable = typeof table !== 'undefined' ? table : ee.FeatureCollection([]);
 
 var agbdTable = rawTable.map(function (f) {
@@ -32,9 +33,9 @@ var uniqueQuarters = ee.List(
 print('1. Jumlah Titik Input (agbdTable):', agbdTable.size());
 print('2. Daftar Kuartal pada Titik Target:', uniqueQuarters);
 
-// =============================================================
-// FUNGSI: PERHITUNGAN RENTANG WAKTU KUARTAL
-// =============================================================
+// -------------------------------------------------------------
+// PERHITUNGAN RENTANG WAKTU KUARTAL
+// -------------------------------------------------------------
 function getQuarterInterval(yqStr) {
   var str = ee.String(yqStr);
   var parts = str.split('_');
@@ -59,9 +60,9 @@ function getQuarterInterval(yqStr) {
   return { start: startDate, end: endDate };
 }
 
-// =============================================================
-// FUNGSI: RADIOMETRIC TERRAIN FLATTENING (MULLISSA ET AL., 2021)
-// =============================================================
+// -------------------------------------------------------------
+// RADIOMETRIC TERRAIN FLATTENING (MULLISSA ET AL., 2021)
+// -------------------------------------------------------------
 var dem = ee.Image('USGS/SRTMGL1_003');
 var terrain = ee.Terrain.products(dem);
 var slope = terrain.select('slope').multiply(Math.PI / 180);
@@ -91,9 +92,9 @@ function applyTerrainFlattening(image) {
   return image.addBands([gamma0_VV, gamma0_VH], null, true);
 }
 
-// =============================================================
-// FUNGSI: PREPARASI SENTINEL-1 KE SKALA LINIER
-// =============================================================
+// -------------------------------------------------------------
+// PREPARASI SENTINEL-1 KE SKALA LINIER
+// -------------------------------------------------------------
 function prepareSentinel1(image) {
   var flattened = applyTerrainFlattening(image);
   var linVV = ee.Image(10).pow(flattened.select('VV').divide(10)).rename('VV_lin');
@@ -101,9 +102,9 @@ function prepareSentinel1(image) {
   return linVV.addBands(linVH);
 }
 
-// =============================================================
-// FUNGSI: SPECKLE FILTERING PADA HASIL KOMPOSIT (1 KALI SAJA)
-// =============================================================
+// -------------------------------------------------------------
+// SPECKLE FILTERING PADA HASIL KOMPOSIT (1 KALI SAJA)
+// -------------------------------------------------------------
 function applySpeckleFilterLinear(imageLin) {
   var vvFiltered = imageLin.select('VV_lin').reduceNeighborhood({
     reducer: ee.Reducer.mean(),
@@ -121,9 +122,9 @@ function applySpeckleFilterLinear(imageLin) {
   return ee.Image.cat([vvDB, vhDB]);
 }
 
-// =============================================================
-// FUNGSI: EKSTRAKSI FITUR TEKSTUR GLCM
-// =============================================================
+// -------------------------------------------------------------
+// EKSTRAKSI FITUR TEKSTUR GLCM
+// -------------------------------------------------------------
 function extractGLCM(image) {
   var vvByte = image.select('VV')
     .unitScale(-25.0, 0.0)
@@ -146,9 +147,9 @@ function extractGLCM(image) {
   return image.addBands([vvGLCM, vhGLCM]);
 }
 
-// =============================================================
-// TAHAP 1: PREPROCESSING KOLEKSI SENTINEL-1
-// =============================================================
+// -------------------------------------------------------------
+// PREPROCESSING KOLEKSI SENTINEL-1
+// -------------------------------------------------------------
 var s1Base = ee.ImageCollection('COPERNICUS/S1_GRD')
   .filterBounds(overallRegion) // Optimasi: Bounding box tunggal
   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
@@ -166,9 +167,9 @@ var s1Preprocessed = s1Collection
 print('3. Total Citra Sentinel-1 Terfilter:', s1Preprocessed.size());
 var s1OverallLin = s1Preprocessed.median();
 
-// =============================================================
-// TAHAP 2: EKSTRAKSI FITUR KUARTALAN SENTINEL-1
-// =============================================================
+// -------------------------------------------------------------
+// EKSTRAKSI FITUR KUARTALAN SENTINEL-1
+// -------------------------------------------------------------
 var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
   yqStr = ee.String(yqStr);
 
@@ -177,11 +178,14 @@ var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
   );
 
   var interval = getQuarterInterval(yqStr);
-  var s1QuarterMedianLin = s1Preprocessed
-    .filterDate(interval.start, interval.end)
-    .median()
-    .unmask(s1OverallLin);
-
+  var s1QuarterFiltered = s1Preprocessed.filterDate(interval.start, interval.end);
+  var s1QuarterMedianLin = ee.Image(
+    ee.Algorithms.If(
+      s1QuarterFiltered.size().gt(0),
+      s1QuarterFiltered.median(),
+      s1OverallLin
+    )
+  );
   var s1FilteredDB = applySpeckleFilterLinear(s1QuarterMedianLin);
   var s1Composite = extractGLCM(s1FilteredDB)
     .resample('bilinear')
@@ -190,9 +194,9 @@ var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
       'VV_contrast', 'VV_ent', 'VV_corr',
       'VH_contrast', 'VH_ent', 'VH_corr'
     ], [
-      's1_vv', 's1_vh',
-      's1_vv_contrast', 's1_vv_ent', 's1_vv_corr',
-      's1_vh_contrast', 's1_vh_ent', 's1_vh_corr'
+      'vv', 'vh',
+      'vv_cont', 'vv_ent', 'vv_corr',
+      'vh_cont', 'vh_ent', 'vh_corr'
     ]);
 
   return s1Composite.sampleRegions({
@@ -200,15 +204,15 @@ var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
     scale: SCALE,
     geometries: true,
     tileScale: 4
-  }).filter(ee.Filter.notNull(['s1_vv', 's1_vh']));
+  }).filter(ee.Filter.notNull(['vv', 'vh']));
 });
 
 var finalDataset = ee.FeatureCollection(quarterlyCollections).flatten();
 print('4. Contoh Data Pertama:', finalDataset.first());
 
-// =============================================================
-// TAHAP 3: EKSPOR DATASET GEDI + SENTINEL-2 + SENTINEL-1
-// =============================================================
+// -------------------------------------------------------------
+// EKSPOR DATASET GEDI + SENTINEL-2 + SENTINEL-1
+// -------------------------------------------------------------
 Export.table.toAsset({
   collection: finalDataset,
   description: 'GEDI_S2_S1_Combined_Dataset',

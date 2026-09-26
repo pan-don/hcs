@@ -4,6 +4,7 @@
 var SCALE = 30;
 var PROJECTION = 'EPSG:32648';
 var CS_THRESHOLD = 0.60;
+var GLCM_SIZE = 5;
 var EXPORT_PATH = 'users/sananta/';
 
 // -------------------------------------------------------------
@@ -64,7 +65,6 @@ function getQuarterInterval(yqStr) {
 // -------------------------------------------------------------
 function calculateSpectralIndices(image) {
   var blue = image.select('B2');
-  var green = image.select('B3');
   var red = image.select('B4');
   var re1 = image.select('B5');
   var re2 = image.select('B6');
@@ -74,23 +74,21 @@ function calculateSpectralIndices(image) {
 
   var ndvi = nir.subtract(red).divide(nir.add(red)).rename('ndvi');
 
-  var gndvi = nir.subtract(green).divide(nir.add(green)).rename('gndvi');
-
   var evi = image.expression(
     '2.5 * ((NIR - RED) / (NIR + 6.0 * RED - 7.5 * BLUE + 1.0))',
     { NIR: nir, RED: red, BLUE: blue }
   ).rename('evi');
+
+  var ndre = nir.subtract(re1).divide(nir.add(re1)).rename('ndre');
 
   var ireci = image.expression(
     '(RE3 - RED) / (RE1 / RE2)',
     { RE3: re3, RED: red, RE1: re1, RE2: re2 }
   ).rename('ireci');
 
-  var rvi = nir.divide(red).rename('rvi');
-
   var gaoNdwi = nir.subtract(swir1).divide(nir.add(swir1)).rename('gao_ndwi');
 
-  return image.addBands([ndvi, gndvi, evi, ireci, rvi, gaoNdwi]);
+  return image.addBands([ndvi, evi, ndre, ireci, gaoNdwi]);
 }
 
 // -------------------------------------------------------------
@@ -104,6 +102,31 @@ function prepareSentinel2(image) {
   return image.addBands(scaled, null, true)
     .updateMask(clearMask)
     .select(opticalBands);
+}
+
+// -------------------------------------------------------------
+// EKSTRAKSI TEKSTUR GLCM SENTINEL-2
+// -------------------------------------------------------------
+function extractS2GLCM(image) {
+  var ireciBins = image.select('ireci')
+    .unitScale(0.0, 1.2)
+    .multiply(63)
+    .toByte()
+    .rename('ireci');
+
+  var swirBins = image.select('B11')
+    .unitScale(0.02, 0.35)
+    .multiply(63)
+    .toByte()
+    .rename('swir');
+
+  var ireciGLCM = ireciBins.glcmTexture({ size: GLCM_SIZE })
+    .select(['ireci_contrast', 'ireci_ent', 'ireci_corr'], ['ireci_cont', 'ireci_ent', 'ireci_corr']);
+
+  var swirGLCM = swirBins.glcmTexture({ size: GLCM_SIZE })
+    .select(['swir_contrast', 'swir_ent', 'swir_corr'], ['swir_cont', 'swir_ent', 'swir_corr']);
+
+  return image.addBands([ireciGLCM, swirGLCM]);
 }
 
 // -------------------------------------------------------------
@@ -140,14 +163,18 @@ var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
     .median()
     .unmask(s2Overall);
 
-  var composite = s2Median
+  var composite = extractS2GLCM(s2Median)
     .resample('bilinear')
     .select([
       'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B11', 'B12',
-      'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi'
+      'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
+      'ireci_cont', 'ireci_ent', 'ireci_corr',
+      'swir_cont', 'swir_ent', 'swir_corr'
     ], [
       'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b11', 'b12',
-      'ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi'
+      'ndvi', 'evi', 'ndre', 'ireci', 'gao_ndwi',
+      'ireci_cont', 'ireci_ent', 'ireci_corr',
+      'swir_cont', 'swir_ent', 'swir_corr'
     ]);
 
   return composite.sampleRegions({
@@ -155,7 +182,7 @@ var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
     scale: SCALE,
     geometries: true,
     tileScale: 4
-  }).filter(ee.Filter.notNull(['ndvi', 'gndvi', 'evi', 'ireci', 'rvi', 'gao_ndwi']));
+  }).filter(ee.Filter.notNull(['ndvi', 'ireci', 'ndre']));
 });
 
 var finalDataset = ee.FeatureCollection(quarterlyCollections).flatten();

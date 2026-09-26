@@ -1,7 +1,8 @@
-// =============================================================
-// KONFIGURASI DAN KONSTANTA
-// =============================================================
+// -------------------------------------------------------------
+// KONFIGURASI
+// -------------------------------------------------------------
 var SCALE = 30;
+var PROJECTION = 'EPSG:32648';
 var EXPORT_PATH = 'users/sananta/';
 
 var DW_INPUT_BANDS = [
@@ -14,9 +15,9 @@ var DW_OUTPUT_BANDS = [
   'crops', 'shrub_scrub', 'built', 'bareland'
 ];
 
-// =============================================================
+// -------------------------------------------------------------
 // PEMULIHAN GEOMETRI SPASIAL (JIKA INPUT DARI CSV / ASSET)
-// =============================================================
+// -------------------------------------------------------------
 var rawTable = typeof table !== 'undefined' ? table : ee.FeatureCollection([]);
 
 var agbdTable = rawTable.map(function (f) {
@@ -41,9 +42,9 @@ var uniqueQuarters = ee.List(
 print('1. Jumlah Titik Input DW (agbdTable):', agbdTable.size());
 print('2. Daftar Kuartal pada Titik Target:', uniqueQuarters);
 
-// =============================================================
-// FUNGSI: PERHITUNGAN RENTANG WAKTU KUARTAL
-// =============================================================
+// -------------------------------------------------------------
+// PERHITUNGAN RENTANG WAKTU KUARTAL
+// -------------------------------------------------------------
 function getQuarterInterval(yqStr) {
   var str = ee.String(yqStr);
   var parts = str.split('_');
@@ -68,9 +69,9 @@ function getQuarterInterval(yqStr) {
   return { start: startDate, end: endDate };
 }
 
-// =============================================================
-// TAHAP 1: PREPROCESSING KOLEKSI DYNAMIC WORLD V1
-// =============================================================
+// -------------------------------------------------------------
+// PREPROCESSING KOLEKSI DYNAMIC WORLD V1
+// -------------------------------------------------------------
 var dwCollection = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
   .filterBounds(overallRegion)
   .select(DW_INPUT_BANDS);
@@ -81,9 +82,9 @@ print('3. Total Citra Dynamic World Terfilter:', dwCollection.size());
 var dwOverall = dwCollection.mean().resample('bilinear')
   .select(DW_INPUT_BANDS, DW_OUTPUT_BANDS);
 
-// =============================================================
-// TAHAP 2: EKSTRAKSI FITUR KUARTALAN DYNAMIC WORLD
-// =============================================================
+// -------------------------------------------------------------
+// EKSTRAKSI FITUR KUARTALAN DYNAMIC WORLD
+// -------------------------------------------------------------
 var quarterlyCollections = uniqueQuarters.map(function (yqStr) {
   yqStr = ee.String(yqStr);
 
@@ -116,9 +117,9 @@ var finalDataset = ee.FeatureCollection(quarterlyCollections).flatten();
 print('4. Jumlah Titik Final Master Dataset:', finalDataset.size());
 print('5. Contoh Data Pertama Master Dataset:', finalDataset.first());
 
-// =============================================================
-// TAHAP 3: EKSPOR DATASET FINAL MULTIMODAL LENGKAP
-// =============================================================
+// -------------------------------------------------------------
+// EKSPOR DATASET FINAL MULTIMODAL LENGKAP
+// -------------------------------------------------------------
 Export.table.toAsset({
   collection: finalDataset,
   description: 'GEDI_S2_S1_DEM_DW_Master_Dataset',
